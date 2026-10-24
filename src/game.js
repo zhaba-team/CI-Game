@@ -149,7 +149,7 @@ export function createGame({ onNewGame }) {
       else if (status === QuestStatus.AVAILABLE) {
         modal.setActions([
           { label: 'Позже' },
-          { label: '✋ Взять квест', primary: true, onClick: () => acceptQuest(quest) },
+          { label: '✋ Взять задачу', primary: true, onClick: () => acceptQuest(quest) },
         ]);
       } else if (status === QuestStatus.DONE) {
         modal.setActions([{ label: 'Пока!', primary: true }]);
@@ -163,7 +163,7 @@ export function createGame({ onNewGame }) {
   function acceptQuest(quest) {
     store.setQuestStatus(quest.id, QuestStatus.ACTIVE);
     closeModal();
-    hud.toast(`Новый квест: «${quest.title}». Иди к жёлтому маркеру — ${quest.where}.`, 'quest');
+    hud.toast(`Новая задача: «${quest.title}». Иди к жёлтому маркеру — ${quest.where}.`, 'quest');
   }
 
   // ---------- Мини-игры ----------
@@ -193,7 +193,7 @@ export function createGame({ onNewGame }) {
   function showLesson(quest, npc) {
     const dayDone = isDayDone();
     openModal({
-      title: 'Квест выполнен! 🎉',
+      title: 'Задача выполнена! 🎉',
       subtitle: quest.title,
       body: h('div', { class: 'lesson' },
         h('div', { class: 'lesson-tag' }, `💡 Что ты узнал: ${quest.lesson.title}`),

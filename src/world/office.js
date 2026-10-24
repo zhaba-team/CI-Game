@@ -146,11 +146,8 @@ export function buildOffice() {
     root.add(g);
     return {
       group: g,
-      color,
-      sign: null,
       collider: { x0: 5 - 0.15, z0: doorZ - 1.75, x1: 5 + 0.15, z1: doorZ + 1.75 },
       occluder: leaf,
-      doorZ,
     };
   };
   const doors = {
@@ -162,7 +159,7 @@ export function buildOffice() {
     const k = list.indexOf(item);
     if (k !== -1) list.splice(k, 1);
   };
-  // locked — [{ room, sign }] закрытых комнат; текст таблички приходит из данных дней
+  // locked — [{ room }] закрытых комнат
   const setLocks = (locked) => {
     for (const [room, door] of Object.entries(doors)) {
       const lock = locked.find((l) => l.room === room);
@@ -174,12 +171,6 @@ export function buildOffice() {
       }
       addOnce(colliders, door.collider);
       addOnce(occluders, door.occluder);
-      if (!door.sign && lock.sign) {
-        door.sign = createWallSign(lock.sign, { width: 1.6, height: 0.3, letterColor: door.color, frameColor: door.color });
-        door.sign.position.set(5 - 0.06, 1.5, door.doorZ);
-        door.sign.rotation.y = -Math.PI / 2; // лицом в open-space
-        door.group.add(door.sign);
-      }
     }
   };
 

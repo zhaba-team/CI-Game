@@ -21,16 +21,20 @@ export function createNpc(def, spot) {
   model.rotation.y = spot.face ?? 0;
   const top = 2.15 * (def.style.height ?? 1);
 
-  const label = textSprite(`${def.name} · ${def.role}`, { height: 0.26, size: 40 });
-  label.position.y = top + 0.2;
-  group.add(label);
+  // Имя крупно, под ним должность — мельче и бледнее
+  const nameLabel = textSprite(def.name, { height: 0.26, size: 40 });
+  nameLabel.position.y = top + 0.38;
+  const roleLabel = textSprite(def.role, { height: 0.2, size: 34, bg: 'rgba(18,53,36,0.6)', color: '#d6f5e2' });
+  roleLabel.position.y = top + 0.12;
+  group.add(nameLabel, roleLabel);
+  const markerY = top + 0.8; // значки статуса — над плашкой с именем
 
   const markers = {
     available: exclamation(),
     active: textSprite('…', { bg: 'rgba(90,90,90,0.85)', height: 0.34 }),
     done: textSprite('✓', { bg: 'rgba(46,158,91,0.95)', height: 0.34 }),
   };
-  Object.values(markers).forEach((m) => { m.position.y = top + 0.55; m.visible = false; group.add(m); });
+  Object.values(markers).forEach((m) => { m.position.y = markerY; m.visible = false; group.add(m); });
 
   const baseFace = spot.face ?? 0;
   const tmp = new THREE.Vector3();
@@ -51,7 +55,7 @@ export function createNpc(def, spot) {
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       model.rotation.y += diff * (1 - Math.exp(-dt * 5));
       model.userData.animate(dt, 0, time + group.position.x);
-      markers.available.position.y = top + 0.5 + Math.sin(time * 3) * 0.08;
+      markers.available.position.y = markerY - 0.05 + Math.sin(time * 3) * 0.08;
       markers.available.rotation.y = time * 2;
     },
   };
