@@ -63,9 +63,13 @@ function showStart() {
   }
   const dayQuests = questsOfDay(saved.day, QUESTS);
   const done = dayQuests.filter((q) => saved.quests[q.id] === store.QuestStatus.DONE).length;
+  // Многошаговый квест посреди сюжета — показываем, на каком он шаге
+  const inSteps = dayQuests.find((q) => q.steps && saved.quests[q.id] === store.QuestStatus.ACTIVE);
+  const stepIndex = inSteps ? (saved.steps?.[inSteps.id]?.index ?? 0) : 0;
+  const stepNote = inSteps ? ` · «${inSteps.title}»: шаг ${stepIndex + 1} из ${inSteps.steps.length}` : '';
   const progress = saved.finished
     ? 'Стажировка пройдена 🏆'
-    : `${DAYS[saved.day].title} · заданий дня выполнено ${done} из ${dayQuests.length}`;
+    : `${DAYS[saved.day].title} · заданий дня выполнено ${done} из ${dayQuests.length}${stepNote}`;
   content.replaceChildren(
     h('div', { class: 'resume' },
       h('p', {}, 'С возвращением, ', h('b', {}, saved.name), '!'),

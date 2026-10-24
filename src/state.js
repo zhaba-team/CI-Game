@@ -1,5 +1,7 @@
 // Состояние игры и его сохранение в localStorage.
 const KEY = 'doncode-intern-save';
+// VERSION не повышаем при добавлении полей: resume() мержит emptyState,
+// поэтому старые сейвы v2 получают новые поля (например, steps) со значениями по умолчанию.
 const VERSION = 2;
 
 export const QuestStatus = {
@@ -13,6 +15,7 @@ function emptyState(name) {
     version: VERSION,
     name,
     quests: {},           // questId -> QuestStatus
+    steps: {},            // questId -> { index, cleared } — шаг многошагового квеста и выполненные цели шага
     player: null,         // { x, z, heading }
     day: 0,               // индекс текущего рабочего дня в DAYS (quests/days.js)
     dayIntroShown: false, // интро текущего дня уже закрыто
@@ -60,6 +63,25 @@ export function questStatus(id) {
 
 export function setQuestStatus(id, status) {
   state.quests[id] = status;
+  persist();
+  listeners.forEach((fn) => fn(state));
+}
+
+// Текущий шаг квеста со steps (quests/quests.js): index — номер шага, cleared — id выполненных целей шага
+export function questStep(id) {
+  return state.steps[id] ?? { index: 0, cleared: [] };
+}
+
+export function setQuestStep(id, index) {
+  state.steps[id] = { index, cleared: [] };
+  persist();
+  listeners.forEach((fn) => fn(state));
+}
+
+export function markCleared(id, targetId) {
+  const step = questStep(id);
+  if (step.cleared.includes(targetId)) return;
+  state.steps[id] = { index: step.index, cleared: [...step.cleared, targetId] };
   persist();
   listeners.forEach((fn) => fn(state));
 }

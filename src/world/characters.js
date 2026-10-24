@@ -11,7 +11,7 @@ const DEFAULT_STYLE = {
   pants: '#2f3a4a',
   shoes: '#222222',
   hair: '#3b2a20',
-  hairStyle: 'short', // short | parted | quiff | long | bun | spiky | none
+  hairStyle: 'short', // short | parted | quiff | long | bun | spiky | bob | none
   beardStyle: 'none', // none | full | trimmed | goatee | stubble
   beardColor: null,   // по умолчанию — цвет hair
   mouth: 'smile',     // smile | grin | neutral
@@ -31,7 +31,12 @@ const DEFAULT_STYLE = {
   height: 1,
 };
 
-const HAIR_STYLES = ['short', 'parted', 'quiff', 'long', 'bun', 'spiky', 'none'];
+// Поза сидя: бедро (y 0.82) опускается к сиденью высотой ~0.45 м с учётом толщины ноги
+const SIT_DROP = -0.3;
+const SIT_LEGS = -Math.PI / 2 + 0.12; // ноги вперёд, ступни чуть ниже колен
+const SIT_ARMS = -0.7;                // руки вперёд, на столешницу
+
+const HAIR_STYLES = ['short', 'parted', 'quiff', 'long', 'bun', 'spiky', 'bob', 'none'];
 const BEARD_STYLES = ['none', 'full', 'trimmed', 'goatee', 'stubble'];
 const MOUTHS = ['smile', 'grin', 'neutral'];
 const GLASSES_STYLES = ['classic', 'bold'];
@@ -117,6 +122,20 @@ function addHair(head, s) {
       head.add(box(0.44, 0.08, 0.42, c, 0, 0.41, 0)); // верх выше макушки: иначе z-fighting
       head.add(box(0.44, 0.3, 0.08, c, 0, 0.16, -0.19));
       break;
+    case 'bob': {
+      // Каре до подбородка с пробором по центру: шапка, шторка чёлки из двух половинок,
+      // пряди по бокам до линии подбородка и затылок до шеи. Все грани — за поверхностью головы.
+      head.add(box(0.45, 0.08, 0.43, c, 0, 0.45, -0.01));
+      for (const sx of [-1, 1]) {
+        const fringe = box(0.17, 0.13, 0.05, c, sx * 0.105, 0.36, 0.205);
+        fringe.rotation.z = -sx * 0.18; // к вискам ниже — пробор посередине остаётся виден
+        head.add(fringe);
+        head.add(box(0.05, 0.44, 0.36, c, sx * 0.228, 0.07, -0.025)); // боковые пряди до подбородка
+        head.add(box(0.05, 0.3, 0.06, c, sx * 0.2, 0.1, 0.17));       // пряди, обрамляющие лицо
+      }
+      head.add(box(0.46, 0.46, 0.05, c, 0, 0.05, -0.215)); // затылок до шеи
+      break;
+    }
     default:
       break;
   }
@@ -359,18 +378,24 @@ export function createCharacter(styleOverrides = {}) {
   root.scale.setScalar(s.height);
 
   let phase = 0;
+  let sitting = false;
   root.userData.parts = parts;
+  // 'sit' — бёдра на высоте сиденья SEAT_H, ноги вперёд, руки на столе; 'stand' — обычная поза
+  root.userData.setPose = (pose) => { sitting = pose === 'sit'; };
   // speed — текущая скорость (м/с), чтобы анимация ходьбы соответствовала движению
   root.userData.animate = (dt, speed, time) => {
-    const moving = speed > 0.1;
+    const moving = speed > 0.1 && !sitting;
     phase += dt * (moving ? 2.2 + speed * 1.3 : 0);
     const swing = moving ? Math.sin(phase) * Math.min(0.7, speed * 0.16) : 0;
     const lerp = 1 - Math.exp(-dt * 12);
-    legL.rotation.x += (swing - legL.rotation.x) * lerp;
-    legR.rotation.x += (-swing - legR.rotation.x) * lerp;
-    armL.rotation.x += (-swing - armL.rotation.x) * lerp;
-    armR.rotation.x += (swing - armR.rotation.x) * lerp;
-    body.position.y = moving ? Math.abs(Math.sin(phase)) * 0.05 : Math.sin(time * 2) * 0.012;
+    const leg = sitting ? SIT_LEGS : 0;
+    const arm = sitting ? SIT_ARMS : 0;
+    legL.rotation.x += (leg + swing - legL.rotation.x) * lerp;
+    legR.rotation.x += (leg - swing - legR.rotation.x) * lerp;
+    armL.rotation.x += (arm - swing - armL.rotation.x) * lerp;
+    armR.rotation.x += (arm + swing - armR.rotation.x) * lerp;
+    const base = sitting ? SIT_DROP : 0;
+    body.position.y = base + (moving ? Math.abs(Math.sin(phase)) * 0.05 : Math.sin(time * 2) * 0.012);
   };
   return root;
 }

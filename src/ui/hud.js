@@ -1,4 +1,4 @@
-// HUD: журнал заданий, подсказка взаимодействия, всплывающие уведомления.
+// HUD: журнал заданий, подсказка взаимодействия, всплывающие уведомления, вспышка тревоги.
 import { h } from './dom.js';
 import { QuestStatus } from '../state.js';
 
@@ -14,13 +14,16 @@ export function createHud() {
   const prompt = document.getElementById('prompt');
   const toasts = document.getElementById('toasts');
   let collapsed = window.innerWidth < 640;
+  const flash = h('div', { class: 'alarm-flash hidden' });
+  hud.append(flash);
 
   return {
     show() { hud.classList.remove('hidden'); },
     hide() { hud.classList.add('hidden'); },
 
-    // title — заголовок журнала (название дня), doneHint — подсказка последней строкой, когда день завершён
-    renderJournal(quests, npcs, statusOf, { title, doneHint } = {}) {
+    // title — заголовок журнала (название дня), doneHint — подсказка последней строкой, когда день завершён,
+    // hintOf(quest) — подсказка для активного квеста (у многошагового — из текущего шага)
+    renderJournal(quests, npcs, statusOf, { title, doneHint, hintOf = (q) => `Иди: ${q.where}` } = {}) {
       const done = quests.filter((q) => statusOf(q.id) === QuestStatus.DONE).length;
       const header = h('button', {
         class: 'journal-head',
@@ -29,7 +32,7 @@ export function createHud() {
       const items = quests.map((q) => {
         const st = statusOf(q.id);
         const npc = npcs.find((n) => n.id === q.npc);
-        const hint = st === QuestStatus.AVAILABLE ? `Поговори: ${npc.name}` : st === QuestStatus.ACTIVE ? `Иди: ${q.where}` : 'Выполнено';
+        const hint = st === QuestStatus.AVAILABLE ? `Поговори: ${npc.name}` : st === QuestStatus.ACTIVE ? hintOf(q) : 'Выполнено';
         return h('li', { class: st }, h('span', { class: 'qi' }, STATUS_ICON[st]), h('div', {}, h('div', { class: 'qt' }, q.title), h('div', { class: 'qh' }, hint)));
       });
       if (doneHint) items.push(h('li', { class: 'exit-hint' }, doneHint));
@@ -42,6 +45,14 @@ export function createHud() {
       if (!text) { prompt.classList.add('hidden'); return; }
       prompt.textContent = text;
       prompt.classList.remove('hidden');
+    },
+
+    // Короткая красная вспышка по краям экрана (начало пожара)
+    alarm() {
+      flash.classList.remove('hidden', 'on');
+      void flash.offsetWidth;
+      flash.classList.add('on');
+      setTimeout(() => flash.classList.add('hidden'), 2000);
     },
 
     toast(text, kind = '') {

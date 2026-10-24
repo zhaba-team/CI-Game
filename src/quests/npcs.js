@@ -91,4 +91,26 @@ export const NPCS = [
       height: 1.05,
     },
   },
+  {
+    id: 'egor',
+    name: 'Егор',
+    role: 'Стажёр',
+    spot: 'egor',
+    style: {
+      skin: '#f2cdb0',
+      shirt: '#d6c7ac',     // бежевый оверсайз-свитшот
+      sleeves: 'long',
+      pants: '#161616',     // широкие чёрные брюки
+      socks: '#f2f2f2',
+      shoes: '#8a8e93',     // серые сабо
+      soles: '#5b8fc7',     // голубая полоса на подошве
+      hair: '#5e4630',
+      hairStyle: 'bob',
+      mouth: 'grin',
+      accent: '#c9b994',
+      accessories: ['badge'],
+      height: 1.08,
+      build: 0.9,
+    },
+  },
 ];

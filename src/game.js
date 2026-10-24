@@ -1,4 +1,5 @@
 // Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов,
+// шаги многошаговых квестов (диалог, предмет, тушение огня, мини-игра),
 // рабочие дни (интро, итоги, переход к следующему дню) и финал.
 import * as THREE from 'three';
 import { buildOffice } from './world/office.js';
@@ -6,12 +7,13 @@ import { buildSky } from './world/sky.js';
 import { buildOutdoor } from './world/outdoor.js';
 import { createPlayer } from './world/player.js';
 import { createNpc, createQuestMarker } from './world/npc.js';
+import { createFire, buildExtinguisher } from './world/fire.js';
 import { createInput } from './input.js';
 import { createHud } from './ui/hud.js';
 import { h } from './ui/dom.js';
 import { openModal, closeModal, onModalChange, isModalOpen } from './ui/modal.js';
 import { NPCS } from './quests/npcs.js';
-import { QUESTS, fillTemplate } from './quests/quests.js';
+import { QUESTS, fillTemplate, questSteps, stepAt } from './quests/quests.js';
 import { DAYS, questsOfDay, dayOfQuest, lockedRooms } from './quests/days.js';
 import { getMinigame } from './minigames/index.js';
 import * as store from './state.js';
@@ -19,6 +21,29 @@ import * as store from './state.js';
 const { QuestStatus } = store;
 const TALK_RADIUS = 2.0;
 const MARKER_RADIUS = 0.8;
+const FIRE_RADIUS = 1.6;
+const STEP_TYPES = ['talk', 'pickup', 'hazard', 'minigame'];
+
+// Ошибки в данных многошагового квеста ловим при старте, а не посреди сюжета
+// «4 дня», «5 дней»
+function daysWord(n) {
+  if (n % 10 === 1 && n % 100 !== 11) return 'день';
+  if ([2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100)) return 'дня';
+  return 'дней';
+}
+
+function validateSteps(quest, spots) {
+  for (const step of questSteps(quest)) {
+    const where = `Шаг «${step.id}» квеста «${quest.id}»`;
+    if (!STEP_TYPES.includes(step.type)) throw new Error(`${where}: неизвестный type «${step.type}»`);
+    if (step.type === 'talk' && !NPCS.some((n) => n.id === step.npc)) throw new Error(`${where}: у шага talk нет npc из npcs.js`);
+    if (step.type === 'talk' && !step.lines?.length) throw new Error(`${where}: у шага talk нет lines`);
+    if (step.type !== 'hazard' && !spots[step.spot]) throw new Error(`${where}: нет точки «${step.spot}» в office.spots`);
+    if ((step.type === 'pickup' || step.type === 'hazard') && !step.item) throw new Error(`${where}: не указан item`);
+    if (step.type === 'hazard' && !step.targets?.every((id) => spots[id]?.rack)) throw new Error(`${where}: targets должны быть точками office.spots с полем rack`);
+    if (step.type === 'minigame') getMinigame(step.minigame);
+  }
+}
 
 export function createGame({ onNewGame }) {
   for (const q of QUESTS) {
@@ -51,6 +76,7 @@ export function createGame({ onNewGame }) {
 
   const office = buildOffice();
   scene.add(office.root);
+  for (const q of QUESTS) validateSteps(q, office.spots);
   // Вид за окнами: небо и улица — декорация без теней и коллизий
   const sky = buildSky();
   scene.add(sky.root);
@@ -74,17 +100,66 @@ export function createGame({ onNewGame }) {
     return npc;
   });
 
-  const markers = new Map(QUESTS.map((q) => {
-    const spot = office.spots[q.spot];
-    const marker = createQuestMarker(spot.x, spot.z);
-    scene.add(marker.group);
-    return [q.id, marker];
+  // Маркер квеста без шагов — на его spot; у многошагового — по маркеру на каждый шаг со spot
+  const markers = QUESTS.flatMap((q) => {
+    const targets = q.steps ? questSteps(q).filter((step) => step.spot) : [null];
+    return targets.map((step) => {
+      const spot = office.spots[step ? step.spot : q.spot];
+      const marker = createQuestMarker(spot.x, spot.z);
+      scene.add(marker.group);
+      return { key: step ? `${q.id}:${step.id}` : q.id, quest: q, step, marker };
+    });
+  });
+
+  // Огонь у каждой цели hazard-шагов: горит до тушения, потом дымит, пока серверная «лежит»
+  const fires = QUESTS.flatMap((q) => questSteps(q).flatMap((step, stepIndex) => {
+    if (step.type !== 'hazard') return [];
+    return step.targets.map((targetId) => {
+      const spot = office.spots[targetId];
+      const fire = createFire(spot.rack.x, spot.rack.y, spot.rack.z);
+      fire.group.visible = false;
+      scene.add(fire.group);
+      return { quest: q, step, stepIndex, targetId, spot, fire };
+    });
   }));
+  const heldExtinguisher = buildExtinguisher();
+  let fireBurning = false; // хоть одна стойка горит — свет серверной мерцает
   const exitMarker = createQuestMarker(office.spots.exit.x, office.spots.exit.z, { color: '#2e9e5b', beam: '#9be7b4' });
   scene.add(exitMarker.group);
 
   const name = () => store.getState().name;
   const t = (text) => fillTemplate(text, name());
+  const npcDef = (id) => NPCS.find((n) => n.id === id);
+
+  // ---------- Шаги квестов ----------
+  const isActive = (q) => store.questStatus(q.id) === QuestStatus.ACTIVE;
+  // Текущий шаг активного многошагового квеста или null
+  const currentStep = (q) => (isActive(q) ? stepAt(q, store.questStep(q.id).index) : null);
+  const markerLive = (m) => (m.step ? currentStep(m.quest) === m.step : isActive(m.quest));
+  // Активный talk-шаг, цель которого — этот NPC
+  const talkStepFor = (npcId) => {
+    for (const quest of QUESTS) {
+      const step = currentStep(quest);
+      if (step?.type === 'talk' && step.npc === npcId) return { quest, step };
+    }
+    return null;
+  };
+  // Предмет в руках — пока текущий шаг hazard, которому он нужен
+  const heldItem = () => QUESTS.map(currentStep).find((step) => step?.type === 'hazard')?.item ?? null;
+  const fireBurns = (f) => {
+    if (!isActive(f.quest)) return false;
+    const { index, cleared } = store.questStep(f.quest.id);
+    return index < f.stepIndex || (index === f.stepIndex && !cleared.includes(f.targetId));
+  };
+  const fireVisible = (f) => isActive(f.quest) && (store.questStep(f.quest.id).index <= f.stepIndex || Boolean(currentStep(f.quest)?.serverDown));
+
+  // Подсказка в журнале для активного квеста
+  function activeHint(q) {
+    const step = currentStep(q);
+    if (!step) return `Иди: ${q.where}`;
+    if (step.type === 'hazard') return `${step.hint}: ${store.questStep(q.id).cleared.length} из ${step.targets.length}`;
+    return step.hint ?? `Иди: ${step.where}`;
+  }
 
   // ---------- Рабочие дни ----------
   const day = () => DAYS[store.currentDay()];
@@ -101,22 +176,39 @@ export function createGame({ onNewGame }) {
     office.setLocks(lockedRooms(store.currentDay()));
     for (const npc of npcs) {
       const quest = QUESTS.find((q) => q.npc === npc.def.id);
-      npc.setStatus(quest ? store.questStatus(quest.id) : null);
+      // «!» над NPC, к которому ведёт текущий talk-шаг, иначе — статус его собственного квеста
+      const status = talkStepFor(npc.def.id) ? QuestStatus.AVAILABLE : quest ? store.questStatus(quest.id) : null;
+      npc.setStatus(status);
       const arrived = npcArrived(npc);
       npc.group.visible = arrived;
       const k = office.colliders.indexOf(npc.collider);
       if (arrived && k === -1) office.colliders.push(npc.collider);
       if (!arrived && k !== -1) office.colliders.splice(k, 1);
     }
-    for (const q of QUESTS) markers.get(q.id).group.visible = store.questStatus(q.id) === QuestStatus.ACTIVE;
+    for (const m of markers) m.marker.group.visible = markerLive(m);
+    fireBurning = false;
+    for (const f of fires) {
+      f.fire.group.visible = fireVisible(f);
+      if (f.fire.busy) continue; // идёт анимация тушения — состояние выставит её окончание
+      const burns = fireBurns(f);
+      if (f.fire.burning !== burns) f.fire.setBurning(burns);
+      fireBurning ||= burns;
+    }
+    const held = heldItem() === 'extinguisher';
+    player.setHeld(held ? heldExtinguisher : null);
+    office.setExtinguisherOnWall(!held);
     const dayDone = isDayDone();
     exitMarker.group.visible = dayDone;
-    const serverFixed = store.questStatus('pipeline') === QuestStatus.DONE;
+    // Сервер «лежит», пока не пройден пайплайн или пока текущий шаг квеста помечен serverDown
+    const serverDown = QUESTS.some((q) => currentStep(q)?.serverDown);
+    const serverFixed = store.questStatus('pipeline') === QuestStatus.DONE && !serverDown;
     office.setServerFixed(serverFixed);
     serverLight.color.set(serverFixed ? '#6bc5ff' : '#ff6b6b');
+    serverLight.intensity = 6;
     hud.renderJournal(dayQuests(), NPCS, store.questStatus, {
       title: day().title,
       doneHint: dayDone ? 'День завершён — выход у ресепшена 🚪' : null,
+      hintOf: activeHint,
     });
   }
   store.onChange(refresh);
@@ -128,15 +220,13 @@ export function createGame({ onNewGame }) {
     return h('div', { class: 'avatar', style: { background: def.style.shirt, borderColor: def.style.accent } }, def.name[0]);
   }
 
-  function talk(npc) {
-    const quest = QUESTS.find((q) => q.npc === npc.def.id);
-    const status = store.questStatus(quest.id);
-    const lines = (status === QuestStatus.AVAILABLE ? quest.dialog.intro : status === QuestStatus.ACTIVE ? quest.dialog.active : quest.dialog.done).map(t);
+  // Диалог по репликам lines; на последней реплике — кнопки lastActions
+  function openDialog(def, lines, lastActions) {
     let index = 0;
     const bubble = h('div', { class: 'bubble' });
     const dots = h('div', { class: 'dots' });
-    const body = h('div', { class: 'dialog' }, npcAvatar(npc.def), h('div', { class: 'dialog-text' }, bubble, dots));
-    const modal = openModal({ title: npc.def.name, badge: npc.def.role, body });
+    const body = h('div', { class: 'dialog' }, npcAvatar(def), h('div', { class: 'dialog-text' }, bubble, dots));
+    const modal = openModal({ title: def.name, badge: def.role, body });
 
     const show = () => {
       bubble.textContent = lines[index];
@@ -144,32 +234,84 @@ export function createGame({ onNewGame }) {
       void bubble.offsetWidth;
       bubble.classList.add('appear');
       dots.replaceChildren(...(lines.length > 1 ? lines.map((_, i) => h('i', { class: i === index ? 'on' : '' })) : []));
-      const last = index === lines.length - 1;
-      if (!last) modal.setActions([{ label: 'Далее →', primary: true, onClick: () => { index++; show(); } }]);
-      else if (status === QuestStatus.AVAILABLE) {
-        modal.setActions([
-          { label: 'Позже' },
-          { label: '✋ Взять задачу', primary: true, onClick: () => acceptQuest(quest) },
-        ]);
-      } else if (status === QuestStatus.DONE) {
-        modal.setActions([{ label: 'Пока!', primary: true }]);
-      } else {
-        modal.setActions([{ label: 'Понятно', primary: true }]);
-      }
+      if (index < lines.length - 1) modal.setActions([{ label: 'Далее →', primary: true, onClick: () => { index++; show(); } }]);
+      else modal.setActions(lastActions);
     };
     show();
   }
 
+  function talk(npc) {
+    const target = talkStepFor(npc.def.id);
+    if (target) { talkStep(target.quest, target.step); return; }
+    const quest = QUESTS.find((q) => q.npc === npc.def.id);
+    const status = store.questStatus(quest.id);
+    const lines = status === QuestStatus.AVAILABLE ? quest.dialog.intro : status === QuestStatus.ACTIVE ? quest.dialog.active : quest.dialog.done;
+    let actions = [{ label: 'Понятно', primary: true }];
+    if (status === QuestStatus.AVAILABLE) {
+      actions = [
+        { label: 'Позже' },
+        { label: quest.dialog.accept ?? '✋ Взять задачу', primary: true, onClick: () => acceptQuest(quest) },
+      ];
+    } else if (status === QuestStatus.DONE) {
+      actions = [{ label: 'Пока!', primary: true }];
+    }
+    openDialog(npc.def, lines.map(t), actions);
+  }
+
+  function talkStep(quest, step) {
+    openDialog(npcDef(step.npc), step.lines.map(t), [
+      { label: step.action ?? 'Понятно', primary: true, onClick: () => { closeModal(); advanceStep(quest); } },
+    ]);
+  }
+
   function acceptQuest(quest) {
+    if (quest.steps) store.setQuestStep(quest.id, 0);
     store.setQuestStatus(quest.id, QuestStatus.ACTIVE);
     closeModal();
-    hud.toast(`Новая задача: «${quest.title}». Иди к жёлтому маркеру — ${quest.where}.`, 'quest');
+    if (quest.steps) announceStep(stepAt(quest, 0));
+    else hud.toast(`Новая задача: «${quest.title}». Иди к жёлтому маркеру — ${quest.where}.`, 'quest');
+  }
+
+  function announceStep(step) {
+    if (step.alarm) hud.alarm();
+    if (step.toast) hud.toast(step.toast, step.alarm ? 'alarm' : 'quest');
+  }
+
+  // Следующий шаг; после последнего квест выполнен
+  function advanceStep(quest) {
+    const next = store.questStep(quest.id).index + 1;
+    const step = stepAt(quest, next);
+    if (!step) { completeQuest(quest); return; }
+    store.setQuestStep(quest.id, next);
+    announceStep(step);
+  }
+
+  function completeQuest(quest) {
+    store.setQuestStatus(quest.id, QuestStatus.DONE);
+    showLesson(quest, npcDef(quest.npc));
+  }
+
+  function pickUp(quest) {
+    advanceStep(quest);
+  }
+
+  // Тушение одной цели hazard-шага: анимация пены, затем отметка в сохранении
+  function extinguish(f) {
+    if (f.fire.busy || !f.fire.burning) return;
+    f.fire.extinguish(() => {
+      store.markCleared(f.quest.id, f.targetId);
+      const { cleared } = store.questStep(f.quest.id);
+      const left = f.step.targets.filter((id) => !cleared.includes(id)).length;
+      if (left > 0) { hud.toast(`🧯 Потушено: ${cleared.length} из ${f.step.targets.length}`); return; }
+      advanceStep(f.quest);
+    });
   }
 
   // ---------- Мини-игры ----------
-  function openMinigame(quest) {
-    const mg = getMinigame(quest.minigame);
-    const npc = NPCS.find((n) => n.id === quest.npc);
+  // step — шаг minigame многошагового квеста; без него мини-игра завершает весь квест
+  function openMinigame(quest, step = null) {
+    const mg = getMinigame(step ? step.minigame : quest.minigame);
+    const npc = npcDef(step?.npc ?? quest.npc);
     const body = h('div', { class: 'minigame' });
     let completed = false;
     openModal({
@@ -184,8 +326,9 @@ export function createGame({ onNewGame }) {
       complete: () => {
         if (completed) return;
         completed = true;
-        store.setQuestStatus(quest.id, QuestStatus.DONE);
-        showLesson(quest, npc);
+        if (!step) { completeQuest(quest); return; }
+        closeModal();
+        advanceStep(quest);
       },
     });
   }
@@ -271,11 +414,11 @@ export function createGame({ onNewGame }) {
   function showFinale() {
     openModal({
       title: `Поздравляем, ${name()}! 🏆`,
-      subtitle: 'Три дня стажировки в «жыбий рыр» позади',
+      subtitle: `${DAYS.length} ${daysWord(DAYS.length)} стажировки в «жыбий рыр» позади`,
       body: h('div', { class: 'lesson' },
         h('p', {}, 'Ты помог всей команде и попробовал себя в разных ролях IT-компании:'),
         h('ul', { class: 'roles' }, QUESTS.map((q) => {
-          const npc = NPCS.find((n) => n.id === q.npc);
+          const npc = npcDef(q.npc);
           return h('li', {}, h('b', {}, q.lesson.title), ` — ${npc.name}, ${npc.role}`);
         })),
         h('p', {}, 'Программист — это не только код. Это внимание к деталям, умение искать ошибки, автоматизировать рутину и работать в команде. Если тебе понравилось — попробуй написать свою первую программу на JavaScript или Python!'),
@@ -289,18 +432,36 @@ export function createGame({ onNewGame }) {
 
   // ---------- Взаимодействие ----------
   let nearNpc = null;
-  let nearMarker = null;
+  let nearMarker = null; // запись из markers
+  let nearFire = null;   // запись из fires — горящая цель рядом
   let nearExit = false;
   let lastMarkerAuto = null;
   let lastExitAuto = false;
 
+  // Подход к маркеру: мини-игра, диалог talk-шага или подбор предмета
+  function activateMarker(m) {
+    if (!m.step || m.step.type === 'minigame') openMinigame(m.quest, m.step);
+    else if (m.step.type === 'talk') talkStep(m.quest, m.step);
+    else if (m.step.type === 'pickup') pickUp(m.quest);
+  }
+
+  // Потушить можно, только когда hazard-шаг этой цели текущий (тогда предмет в руках)
+  const canExtinguish = (f) => currentStep(f.quest) === f.step;
+
   function interact() {
     if (isModalOpen()) return;
-    if (nearMarker) openMinigame(nearMarker);
+    if (nearMarker) activateMarker(nearMarker);
+    else if (nearFire) { if (canExtinguish(nearFire)) extinguish(nearFire); }
     else if (nearExit) showDaySummary();
     else if (nearNpc) talk(nearNpc);
   }
   input.onAction(interact);
+
+  function markerPrompt(m) {
+    if (m.step?.type === 'talk') return { text: `Поговорить: ${npcDef(m.step.npc).name}`, icon: '💬' };
+    if (m.step?.type === 'pickup') return { text: 'Взять', icon: '✋' };
+    return { text: 'Сесть за компьютер', icon: '💻' };
+  }
 
   function checkInteractions() {
     const p = player.position;
@@ -312,10 +473,17 @@ export function createGame({ onNewGame }) {
       if (d < best) { best = d; nearNpc = npc; }
     }
     nearMarker = null;
-    for (const q of QUESTS) {
-      if (store.questStatus(q.id) !== QuestStatus.ACTIVE) continue;
-      const m = markers.get(q.id).position;
-      if (Math.hypot(m.x - p.x, m.z - p.z) < MARKER_RADIUS) { nearMarker = q; break; }
+    for (const m of markers) {
+      if (!m.marker.group.visible) continue;
+      const mp = m.marker.position;
+      if (Math.hypot(mp.x - p.x, mp.z - p.z) < MARKER_RADIUS) { nearMarker = m; break; }
+    }
+    nearFire = null;
+    let bestFire = FIRE_RADIUS;
+    for (const f of fires) {
+      if (!f.fire.group.visible || !f.fire.burning || f.fire.busy) continue;
+      const d = Math.hypot(f.spot.x - p.x, f.spot.z - p.z);
+      if (d < bestFire) { bestFire = d; nearFire = f; }
     }
     const e = exitMarker.position;
     nearExit = exitMarker.group.visible && Math.hypot(e.x - p.x, e.z - p.z) < MARKER_RADIUS;
@@ -323,9 +491,9 @@ export function createGame({ onNewGame }) {
     if (isModalOpen()) return;
     // Автооткрытие мини-игры при подходе к маркеру — один раз, пока игрок не отойдёт.
     // Диалог с NPC открывается только по действию (E / 💬).
-    if (nearMarker && lastMarkerAuto !== nearMarker.id) {
-      lastMarkerAuto = nearMarker.id;
-      openMinigame(nearMarker);
+    if (nearMarker && lastMarkerAuto !== nearMarker.key) {
+      lastMarkerAuto = nearMarker.key;
+      activateMarker(nearMarker);
       return;
     }
     if (!nearMarker) lastMarkerAuto = null;
@@ -339,8 +507,15 @@ export function createGame({ onNewGame }) {
 
     const key = input.state.isTouch ? '' : 'E — ';
     if (nearMarker) {
-      hud.setPrompt(`${key}Сесть за компьютер`);
-      input.setActionVisible(true, '💻');
+      const { text, icon } = markerPrompt(nearMarker);
+      hud.setPrompt(`${key}${text}`);
+      input.setActionVisible(true, icon);
+    } else if (nearFire && canExtinguish(nearFire)) {
+      hud.setPrompt(`${key}${nearFire.step.action}`);
+      input.setActionVisible(true, '🧯');
+    } else if (nearFire) {
+      hud.setPrompt(nearFire.step.need ?? nearFire.step.hint);
+      input.setActionVisible(false);
     } else if (nearExit) {
       hud.setPrompt(`${key}Завершить рабочий день`);
       input.setActionVisible(true, '🚪');
@@ -382,7 +557,13 @@ export function createGame({ onNewGame }) {
     input.update();
     player.update(dt, input, time);
     for (const npc of npcs) npc.update(dt, time, player.position);
-    for (const m of markers.values()) if (m.group.visible) m.update(time);
+    for (const m of markers) if (m.marker.group.visible) m.marker.update(time);
+    for (const f of fires) if (f.fire.group.visible) f.fire.update(time);
+    // Пока горит огонь, свет серверной мерцает рыже-красным
+    if (fireBurning) {
+      serverLight.color.set('#ff7a3a');
+      serverLight.intensity = 6 + Math.sin(time * 11) * 1.6 + Math.sin(time * 23) * 0.8;
+    }
     if (exitMarker.group.visible) exitMarker.update(time);
     for (const fn of office.animated) fn(time);
     sky.update(time);
@@ -439,6 +620,25 @@ export function createGame({ onNewGame }) {
       outdoor: outdoor.stats,
       talk: (npcId) => talk(npcs.find((n) => n.def.id === npcId)),
       minigame: (questId) => openMinigame(QUESTS.find((q) => q.id === questId)),
+      step: (questId) => store.questStep(questId),
+      setStep: (questId, index) => store.setQuestStep(questId, index),
+      // Снова поджечь: квесты с hazard-шагами — активны и на первом шаге
+      ignite: () => {
+        for (const q of QUESTS) {
+          if (!questSteps(q).some((step) => step.type === 'hazard')) continue;
+          store.setQuestStep(q.id, 0);
+          store.setQuestStatus(q.id, QuestStatus.ACTIVE);
+        }
+      },
+      // Потушить всё на текущем hazard-шаге и перейти дальше
+      extinguishAll: () => {
+        for (const q of QUESTS) {
+          const step = currentStep(q);
+          if (step?.type !== 'hazard') continue;
+          step.targets.forEach((id) => store.markCleared(q.id, id));
+          advanceStep(q);
+        }
+      },
       day: () => store.currentDay(),
       completeDay: () => { dayQuests().forEach((q) => store.setQuestStatus(q.id, QuestStatus.DONE)); },
       endDay,
@@ -474,9 +674,9 @@ export function createGame({ onNewGame }) {
 
   function checkInteractionsSilently() {
     const p = player.position;
-    for (const q of QUESTS) {
-      const m = markers.get(q.id).position;
-      if (store.questStatus(q.id) === QuestStatus.ACTIVE && Math.hypot(m.x - p.x, m.z - p.z) < MARKER_RADIUS) lastMarkerAuto = q.id;
+    for (const m of markers) {
+      const mp = m.marker.position;
+      if (markerLive(m) && Math.hypot(mp.x - p.x, mp.z - p.z) < MARKER_RADIUS) lastMarkerAuto = m.key;
     }
     const e = exitMarker.position;
     if (exitMarker.group.visible && Math.hypot(e.x - p.x, e.z - p.z) < MARKER_RADIUS) lastExitAuto = true;

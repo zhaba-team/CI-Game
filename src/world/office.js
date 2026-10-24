@@ -1,12 +1,13 @@
-// Геометрия офиса: open-space, кабинет директора, серверная.
+// Геометрия офиса: open-space, столовая, кабинет директора, серверная.
 // Окна — настоящие проёмы со стеклом; наружу смотрят северная и западная стены.
-// Двери в кабинет и серверную закрываются по рабочим дням (setLocks), у южной стены — выход из офиса.
+// Двери в кабинет, серверную и столовую закрываются по рабочим дням (setLocks), у южной стены — выход из офиса.
 // Возвращает сцену-группу, список коллайдеров (AABB в плоскости XZ),
 // объекты, загораживающие камеру, и именованные точки (spots) для NPC и маркеров.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { mat, glow, box, cyl, ico, group } from './lowpoly.js';
+import { mat, glow, box, cyl, ico, group, textPlane } from './lowpoly.js';
 import { createWallSign } from './signs.js';
+import { buildExtinguisher } from './fire.js';
 
 const WALL_H = 4.2;
 const WALL_T = 0.3;
@@ -26,7 +27,9 @@ export const ROOMS = {
   openSpace: { x0: -16, x1: 5, z0: -12, z1: 12 },
   director: { x0: 5, x1: 16, z0: -12, z1: 0 },
   server: { x0: 5, x1: 16, z0: 0, z1: 12 },
+  canteen: { x0: -16, x1: -7, z0: 4.5, z1: 12 }, // отгороженный юго-западный угол внутри контура open-space
 };
+const CANTEEN_DOOR_X = -11.25; // центр проёма в стене столовой z = 4.5
 
 export function buildOffice() {
   const root = new THREE.Group();
@@ -54,6 +57,14 @@ export function buildOffice() {
   floor(ROOMS.openSpace, '#d9c4a0');
   floor(ROOMS.director, '#8c3b3b');
   floor(ROOMS.server, '#3a4250');
+  // Плитка столовой лежит поверх пола и «паркета» open-space (они до y 0.005) — без z-fighting
+  const canteenFloor = new THREE.Mesh(new THREE.PlaneGeometry(ROOMS.canteen.x1 - ROOMS.canteen.x0, ROOMS.canteen.z1 - ROOMS.canteen.z0), mat('#e8e2d4'));
+  canteenFloor.rotation.x = -Math.PI / 2;
+  canteenFloor.position.set((ROOMS.canteen.x0 + ROOMS.canteen.x1) / 2, 0.007, (ROOMS.canteen.z0 + ROOMS.canteen.z1) / 2);
+  canteenFloor.receiveShadow = true;
+  root.add(canteenFloor);
+  for (let x = ROOMS.canteen.x0 + 0.9; x < ROOMS.canteen.x1; x += 0.9) root.add(box(0.025, 0.003, 7.5, '#cfc6b3', x, 0.007, 8.25));
+  for (let z = ROOMS.canteen.z0 + 0.9; z < ROOMS.canteen.z1; z += 0.9) root.add(box(9, 0.003, 0.025, '#cfc6b3', -11.5, 0.007, z));
 
   // Плитка в серверной и «паркет» в open-space — тонкие полоски
   for (let x = ROOMS.server.x0 + 1; x < ROOMS.server.x1; x += 1.5) {
@@ -116,6 +127,11 @@ export function buildOffice() {
   wallSegment(5, 7, 5, 12);
   // Стена между кабинетом директора и серверной
   wallSegment(5, 0, 16, 0);
+  // Стены столовой: вдоль z = 4.5 с проёмом 3.5 м и вдоль x = −7 до южной стены.
+  // Правый кусок доходит до внешней грани стены x = −7, чтобы в углу не было щели.
+  wallSegment(-16, 4.5, CANTEEN_DOOR_X - 1.75, 4.5);
+  wallSegment(CANTEEN_DOOR_X + 1.75, 4.5, -7 + WALL_T / 2, 4.5);
+  wallSegment(-7, 4.5, -7, 12);
 
   // Дверные проёмы: фрамуга до потолка, наличник по её нижнему краю и табличка на простенке рядом
   const doorSign = (text, doorZ, signZ, color) => {
@@ -131,28 +147,48 @@ export function buildOffice() {
   };
   doorSign('Кабинет директора', -5.25, -2.35, '#8c3b3b');
   doorSign('Серверная', 5.25, 2.35, '#28405a');
+  // Проём столовой в стене вдоль x: фрамуга, наличник и вывеска справа, лицом в open-space (−z)
+  {
+    const transom = box(3.5, WALL_H - DOOR_H, WALL_T, null, CANTEEN_DOOR_X, DOOR_H, 4.5, wallMat);
+    root.add(transom);
+    occluders.push(transom);
+    root.add(box(3.5, 0.12, 0.32, '#c9d1c9', CANTEEN_DOOR_X, DOOR_H - 0.12, 4.5));
+    const sign = createWallSign('Столовая', { width: 1.9, height: 0.34, letterColor: '#c0612b', frameColor: '#c0612b' });
+    sign.position.set(-8.25, 1.85, 4.5 - WALL_T / 2);
+    sign.rotation.y = Math.PI;
+    root.add(sign);
+    solidFrom(sign);
+  }
 
-  // Закрываемые двери в проёмах перегородки. Коллайдер и occluder не через solid():
-  // их добавляет и убирает setLocks в зависимости от дня
-  const lockableDoor = (doorZ, color) => {
+  // Закрываемые двери в проёмах шириной 3.5 м. Коллайдер и occluder не через solid():
+  // их добавляет и убирает setLocks в зависимости от дня.
+  // axis 'z' — проём в стене вдоль z на x = fixed, 'x' — в стене вдоль x на z = fixed; center — центр проёма.
+  const lockableDoor = (axis, fixed, center, color) => {
+    const alongX = axis === 'x';
+    // Мировые координаты по смещению вдоль стены и поперёк неё
+    const at = (along, across) => (alongX ? [center + along, fixed + across] : [fixed + across, center + along]);
     const leafH = DOOR_H - 0.12; // под наличником проёма
-    const leaf = box(0.12, leafH, 3.5, color, 5, 0, doorZ);
-    const g = group(
-      leaf,
-      box(0.04, 0.05, 0.22, '#d9dde0', 5 - 0.08, 1.05, doorZ + 0.35),
-      box(0.04, 0.05, 0.22, '#d9dde0', 5 + 0.08, 1.05, doorZ + 0.35),
-    );
+    const [lx, lz] = at(0, 0);
+    const leaf = box(alongX ? 3.5 : 0.12, leafH, alongX ? 0.12 : 3.5, color, lx, 0, lz);
+    const handle = (side) => {
+      const [hx, hz] = at(0.35, side * 0.08);
+      return box(alongX ? 0.22 : 0.04, 0.05, alongX ? 0.04 : 0.22, '#d9dde0', hx, 1.05, hz);
+    };
+    const g = group(leaf, handle(-1), handle(1));
     g.visible = false;
     root.add(g);
+    const [ax, az] = at(-1.75, -0.15);
+    const [bx, bz] = at(1.75, 0.15);
     return {
       group: g,
-      collider: { x0: 5 - 0.15, z0: doorZ - 1.75, x1: 5 + 0.15, z1: doorZ + 1.75 },
+      collider: { x0: Math.min(ax, bx), z0: Math.min(az, bz), x1: Math.max(ax, bx), z1: Math.max(az, bz) },
       occluder: leaf,
     };
   };
   const doors = {
-    director: lockableDoor(-5.25, '#8c3b3b'),
-    server: lockableDoor(5.25, '#28405a'),
+    director: lockableDoor('z', 5, -5.25, '#8c3b3b'),
+    server: lockableDoor('z', 5, 5.25, '#28405a'),
+    canteen: lockableDoor('x', 4.5, CANTEEN_DOOR_X, '#c0612b'),
   };
   const addOnce = (list, item) => { if (!list.includes(item)) list.push(item); };
   const removeFrom = (list, item) => {
@@ -214,7 +250,7 @@ export function buildOffice() {
   // Вывеска компании: на внутренней грани задней стены, лицом в open-space,
   // центр на ~70 % высоты стены
   const logo = createWallSign('жыбий рыр', { width: 3, height: 0.8, letterColor: '#2e9e5b', frameColor: '#1f7442' });
-  logo.position.set(-8, 2.9, 12 - WALL_T / 2);
+  logo.position.set(-4, 2.9, 12 - WALL_T / 2); // над ресепшеном: левее теперь стена столовой
   logo.rotation.y = Math.PI;
   root.add(logo);
   solidFrom(logo);
@@ -242,6 +278,9 @@ export function buildOffice() {
   lampGrid(ROOMS.openSpace, 7, 8);
   lampGrid(ROOMS.director, 3, 3);
   lampGrid(ROOMS.server, 3, 3);
+  // Ряд панелей open-space на z = 4.5 пришёлся бы на стену столовой — убираем его над столовой
+  const onCanteenWall = ([x, z]) => x < ROOMS.canteen.x1 && Math.abs(z - ROOMS.canteen.z0) < LAMP_FRAME;
+  for (let k = lampCenters.length - 1; k >= 0; k--) if (onCanteenWall(lampCenters[k])) lampCenters.splice(k, 1);
 
   // Все панели — два InstancedMesh (рамки и рассеиватели): +2 draw call вместо сотни
   const lampMesh = (geometry, material, y) => {
@@ -367,7 +406,8 @@ export function buildOffice() {
   }
   solid(SHELF_X - 0.85, -11.85, SHELF_X + 0.85, -11.3);
 
-  // Зона отдыха: диван, кофемашина, кулер
+  // ---------- Столовая ----------
+  // Диван у южной стены, кухонная стойка с кофемашиной и микроволновкой у западной, холодильник и кулер
   const sofa = group(
     box(3, 0.45, 1, '#ef8354', 0, 0, 0),
     box(3, 0.6, 0.25, '#ef8354', 0, 0.45, -0.38),
@@ -378,20 +418,66 @@ export function buildOffice() {
   sofa.rotation.y = Math.PI;
   root.add(sofa);
   solidFrom(sofa);
-  root.add(box(1.4, 0.4, 0.8, '#7a5a3a', -11.5, 0, 8.6));
-  solid(-12.2, 8.2, -10.8, 9);
-  root.add(box(1.2, 0.95, 0.7, '#5a5a5a', -15.2, 0, 4));
-  root.add(box(0.45, 0.55, 0.45, '#222', -15.25, 0.95, 4));
-  root.add(box(0.12, 0.08, 0.05, '#ff5a5a', -15.0, 1.3, 4.18, glow('#ff5a5a', 1)));
-  solid(-16, 3.6, -14.5, 4.4);
-  root.add(cyl(0.22, 0.22, 1.1, 8, '#ffffff', -15.3, 0, 6));
-  root.add(cyl(0.2, 0.2, 0.5, 8, '#8ecae6', -15.3, 1.1, 6, mat('#8ecae6', { transparent: true, opacity: 0.8 })));
-  solid(-15.6, 5.7, -15, 6.3);
+  // Кухонная стойка в простенке западной стены за окном z = 7 (стойка ниже подоконника не нужна)
+  const counter = group(
+    box(0.7, 0.88, 2.4, '#5a6b7a', 0, 0, 0),
+    box(0.76, 0.05, 2.46, '#e9e6df', 0, 0.88, 0),
+    box(0.45, 0.5, 0.4, '#222', 0.02, 0.93, -0.75),             // кофемашина
+    box(0.05, 0.08, 0.12, null, 0.25, 1.25, -0.75, glow('#ff5a5a', 1)),
+    box(0.45, 0.3, 0.6, '#d9dde0', 0, 0.93, 0.35),              // микроволновка
+    box(0.02, 0.2, 0.36, '#1b2430', 0.235, 0.98, 0.3),          // её дверца
+  );
+  counter.position.set(-15.5, 0, 9.6);
+  root.add(counter);
+  solidFrom(counter, 0.05);
+  const fridge = group(
+    box(0.75, 1.9, 0.75, '#eef1f3', 0, 0, 0),
+    box(0.03, 0.5, 0.05, '#9aa3ab', 0.39, 1.1, 0.25),
+    box(0.76, 0.02, 0.76, '#c9d1d6', 0, 1.25, 0),
+  );
+  fridge.position.set(-15.45, 0, 11.4);
+  root.add(fridge);
+  solidFrom(fridge, 0.05);
+  root.add(cyl(0.22, 0.22, 1.1, 8, '#ffffff', -15.4, 0, 5.1));
+  root.add(cyl(0.2, 0.2, 0.5, 8, '#8ecae6', -15.4, 1.1, 5.1, mat('#8ecae6', { transparent: true, opacity: 0.8 })));
+  solid(-15.7, 4.8, -15.1, 5.4);
+
+  // Обеденный стол с двумя лавками вдоль длинных сторон
+  const SEAT_H = 0.45;
+  const diningTable = (x, z) => {
+    const g = group(
+      box(1.6, 0.05, 0.9, '#c98f5a', 0, 0.72, 0),
+      box(0.08, 0.72, 0.08, '#6b4f36', -0.7, 0, 0),
+      box(0.08, 0.72, 0.08, '#6b4f36', 0.7, 0, 0),
+    );
+    for (const sz of [-1, 1]) {
+      g.add(box(1.6, 0.06, 0.36, '#a8744a', 0, SEAT_H - 0.06, sz * 0.72));
+      g.add(box(0.06, SEAT_H - 0.06, 0.3, '#6b4f36', -0.65, 0, sz * 0.72));
+      g.add(box(0.06, SEAT_H - 0.06, 0.3, '#6b4f36', 0.65, 0, sz * 0.72));
+    }
+    g.position.set(x, 0, z);
+    root.add(g);
+    solidFrom(g, 0.05);
+  };
+  diningTable(-12.2, 7.6);
+  diningTable(-8.8, 7.6);
+  // На столе Егора — коробка «Нейрокубер» и кружка
+  const cube = box(0.34, 0.12, 0.26, '#f4f4f2', -12.2, 0.745, 7.75);
+  cube.rotation.y = 0.2;
+  root.add(cube);
+  const cubeLabel = textPlane('Нейрокубер', { color: '#1b2430', height: 0.06, size: 64 });
+  cubeLabel.rotation.set(-Math.PI / 2, 0, 0.2 + Math.PI); // на крышке, читается со стороны прохода
+  cubeLabel.position.set(-12.2, 0.867, 7.75);
+  root.add(cubeLabel);
+  root.add(cyl(0.05, 0.045, 0.1, 8, '#2e9e5b', -11.75, 0.745, 7.95));
+  root.add(cyl(0.05, 0.045, 0.1, 8, '#ef476f', -8.5, 0.745, 7.4));
+  spots.egor = { x: -12.2, z: 8.32, face: Math.PI, sit: true }; // на лавке лицом к проходу
+  spots.egorTalk = { x: -10.5, z: 8.4 };
 
   plant(-15.2, -11.2);
   plant(4.3, -11.2);
   plant(4.3, 11.2, 1.2);
-  plant(-15.2, 11.2, 0.9);
+  plant(-7.7, 11.3, 0.9);
   plant(-3, 8, 1.1);
   plant(-3, -11.2);
 
@@ -474,6 +560,20 @@ export function buildOffice() {
   solidFrom(consoleDesk, 0.05);
   spots.devops = { x: 6.6, z: 3, face: -Math.PI / 2 };
   spots.deskServer = { x: 7.2, z: 9.6 };
+  spots.devopsAlarm = { x: 7.4, z: 4.4 };
+  // Точки тушения — перед лицевой стороной стоек; rack — где горит огонь (верх стойки)
+  spots.fireA = { x: 9, z: 4.15, rack: { x: 9, y: 2.3, z: 3 } };
+  spots.fireB = { x: 11, z: 6.65, rack: { x: 11, y: 2.3, z: 5.5 } };
+  spots.fireC = { x: 9, z: 9.15, rack: { x: 9, y: 2.3, z: 8 } };
+
+  // Огнетушитель на стене open-space рядом с дверью серверной
+  const extinguisher = buildExtinguisher();
+  extinguisher.position.set(5 - WALL_T / 2 - 0.1, 0.75, 8);
+  extinguisher.rotation.y = -Math.PI / 2;
+  const bracket = box(0.06, 0.06, 0.24, '#3a3a3a', 5 - WALL_T / 2 - 0.03, 1.05, 8);
+  root.add(extinguisher, bracket);
+  spots.extinguisher = { x: 4.2, z: 8 };
+  const setExtinguisherOnWall = (visible) => { extinguisher.visible = visible; };
 
   // Мигание лампочек: красные, пока сервер «лежит», зелёные — после починки
   const serverState = { fixed: false };
@@ -494,5 +594,5 @@ export function buildOffice() {
   // Описание внешнего контура для декорации снаружи (world/outdoor.js)
   const outline = { x0: -16, x1: 16, z0: -12, z1: 12, wallT: WALL_T, winW: WIN_W, northWindows: NORTH_WINDOWS, westWindows: WEST_WINDOWS };
 
-  return { root, colliders, occluders, spots, animated, setServerFixed, setLocks, ceilingHeight: WALL_H, outline };
+  return { root, colliders, occluders, spots, animated, setServerFixed, setLocks, setExtinguisherOnWall, ceilingHeight: WALL_H, outline };
 }

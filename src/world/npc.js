@@ -1,7 +1,10 @@
 // NPC с табличкой и значком над головой + маркеры на полу (активные квесты, выход из офиса).
+// spot.sit — NPC сидит (на лавке у стола): не разворачивается к игроку целиком, только поворачивает голову.
 import * as THREE from 'three';
 import { createCharacter } from './characters.js';
 import { mat, glow, textSprite } from './lowpoly.js';
+
+const HEAD_TURN = 0.7; // насколько сидящий NPC поворачивает голову к игроку
 
 function exclamation() {
   const g = new THREE.Group();
@@ -19,7 +22,9 @@ export function createNpc(def, spot) {
   group.add(model);
   group.position.set(spot.x, 0, spot.z);
   model.rotation.y = spot.face ?? 0;
-  const top = 2.15 * (def.style.height ?? 1);
+  const sit = Boolean(spot.sit);
+  if (sit) model.userData.setPose('sit');
+  const top = (sit ? 1.85 : 2.15) * (def.style.height ?? 1);
 
   // Имя крупно, под ним должность — мельче и бледнее
   const nameLabel = textSprite(def.name, { height: 0.26, size: 40 });
@@ -47,13 +52,21 @@ export function createNpc(def, spot) {
       for (const [k, m] of Object.entries(markers)) m.visible = k === status;
     },
     update(dt, time, playerPos) {
-      // Поворачиваемся к игроку, когда он рядом
+      // Поворачиваемся к игроку, когда он рядом; сидящий — только головой
       tmp.copy(playerPos).sub(group.position);
       const near = tmp.lengthSq() < 16;
       const want = near ? Math.atan2(tmp.x, tmp.z) : baseFace;
-      let diff = want - model.rotation.y;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      model.rotation.y += diff * (1 - Math.exp(-dt * 5));
+      const lerp = 1 - Math.exp(-dt * 5);
+      if (sit) {
+        const { head } = model.userData.parts;
+        let look = want - baseFace;
+        look = THREE.MathUtils.clamp(Math.atan2(Math.sin(look), Math.cos(look)), -HEAD_TURN, HEAD_TURN);
+        head.rotation.y += (look - head.rotation.y) * lerp;
+      } else {
+        let diff = want - model.rotation.y;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        model.rotation.y += diff * lerp;
+      }
       model.userData.animate(dt, 0, time + group.position.x);
       markers.available.position.y = markerY - 0.05 + Math.sin(time * 3) * 0.08;
       markers.available.rotation.y = time * 2;

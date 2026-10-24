@@ -152,11 +152,25 @@ export function createPlayer(scene, camera, { colliders, occluders, ceilingHeigh
     computeCamera(1 - Math.exp(-dt * 10));
   }
 
+  // Предмет в правой руке (например, огнетушитель): начало координат предмета — его дно,
+  // верх висит у кисти. null — убрать предмет из рук
+  let held = null;
+  function setHeld(object) {
+    if (held === object) return;
+    if (held) held.removeFromParent();
+    held = object;
+    if (!held) return;
+    held.position.set(0, -0.71 - 0.5, 0.06);
+    held.rotation.set(0, 0, 0);
+    model.userData.parts.armR.add(held);
+  }
+
   return {
     model,
     position: pos,
     place,
     update,
+    setHeld,
     get heading() { return heading; },
   };
 }
