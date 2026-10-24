@@ -149,7 +149,7 @@ body.touch .nick-form input { font-size: 16px; }
   top: calc(12px + env(safe-area-inset-top));
   left: calc(12px + env(safe-area-inset-left));
   width: 290px;
-  max-width: calc(100vw - 90px);
+  max-width: calc(100vw - 146px); /* справа — кнопки 🏆 и ☰ */
   padding: 10px 12px;
 }
 .journal-head {
@@ -567,6 +567,41 @@ pre.terminal { margin: 12px 0 0; background: #0b1f12; color: #7dffa8; font-famil
 .kb-hint { margin-top: 6px; font-size: 8px; line-height: 1.7; }
 @media (max-width: 560px) {
   .kb-grid { grid-template-columns: 1fr; }
+}
+
+/* Коллекция книг 🏆 (кнопка в HUD слева от меню, модалка — ui/trophies.js) */
+#trophy-btn { right: calc(68px + env(safe-area-inset-right)); }
+.trophy-count {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 22px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: var(--yellow);
+  color: #5a4100;
+  font-size: 8px;
+  line-height: 1;
+}
+#trophy-btn.bump { animation: trophy-bump 0.6s ease-out; }
+@keyframes trophy-bump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { #trophy-btn.bump { animation: none; } }
+.trophies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.trophy-card { display: flex; gap: 10px; align-items: flex-start; background: #f5f8f6; border: 2px solid var(--line); border-radius: 12px; padding: 10px; min-width: 0; }
+.trophy-cover { width: 72px; height: 100px; flex-shrink: 0; object-fit: cover; border-radius: 6px; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18); }
+.trophy-placeholder { display: grid; place-items: center; font-size: 28px; background: #dfe4e1; border: 2px dashed var(--line); box-shadow: none; filter: grayscale(1); opacity: 0.7; }
+.trophy-text { min-width: 0; }
+.trophy-card b { display: block; font-size: 10px; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
+.trophy-author { margin-top: 4px; font-size: 8px; line-height: 1.6; color: var(--muted); }
+.trophy-card p { margin: 6px 0 0; font-size: 8px; line-height: 1.8; overflow-wrap: anywhere; }
+.trophy-card.locked { background: #eef1ef; border-style: dashed; color: var(--muted); }
+.trophy-hint { margin-top: 6px; font-size: 8px; line-height: 1.7; }
+@media (max-width: 560px) {
+  .trophies { grid-template-columns: 1fr; }
 }
 
 /* ---------- Адаптив ---------- */

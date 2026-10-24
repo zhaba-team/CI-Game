@@ -21,6 +21,7 @@ function emptyState(name) {
     dayIntroShown: false, // интро текущего дня уже закрыто
     finished: false,      // последний день завершён — стажировка пройдена
     kbSeen: [],           // id терминов Базы знаний (quests/glossary.js), которые игрок уже видел открытыми
+    books: [],            // id найденных коллекционных книг (quests/books.js)
   };
 }
 
@@ -127,6 +128,18 @@ export function markKbSeen(ids) {
   if (!fresh.length) return;
   state.kbSeen = [...state.kbSeen, ...fresh];
   persist();
+}
+
+// Найденные коллекционные книги: HUD обновляет бейдж 🏆, мир прячет подобранную книгу
+export function booksFound() {
+  return state.books;
+}
+
+export function markBookFound(id) {
+  if (state.books.includes(id)) return;
+  state.books = [...state.books, id];
+  persist();
+  listeners.forEach((fn) => fn(state));
 }
 
 export function onChange(fn) {

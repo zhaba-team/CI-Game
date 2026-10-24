@@ -1,6 +1,7 @@
 // Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов,
 // шаги многошаговых квестов (диалог, подход NPC, предмет, тушение огня, мини-игра, полноэкранная сцена),
-// рабочие дни (интро, итоги, переход к следующему дню, вечер), пинг-понг в Игровой, База знаний на полке и финал.
+// рабочие дни (интро, итоги, переход к следующему дню, вечер), пинг-понг в Игровой, База знаний на полке,
+// коллекционные книги и финал.
 import * as THREE from 'three';
 import { buildOffice } from './world/office.js';
 import { buildSky, SKY_DAY, SKY_EVENING } from './world/sky.js';
@@ -12,16 +13,20 @@ import { createInput } from './input.js';
 import { createProps } from './flow/props.js';
 import { createPingPong } from './flow/pingPong.js';
 import { createKnowledgeBase } from './flow/knowledge.js';
+import { createCollectibles } from './flow/collectibles.js';
+import { buildCollectibleBook } from './world/collectibleBook.js';
 import { buildHeldRacket } from './world/gameRoom.js';
 import { createHud } from './ui/hud.js';
 import { h } from './ui/dom.js';
 import { openModal, closeModal, onModalChange, isModalOpen } from './ui/modal.js';
 import { renderKnowledgeBase } from './ui/knowledgeBase.js';
+import { renderTrophies } from './ui/trophies.js';
 import { SCREENS } from './ui/screens.js';
 import { NPCS } from './quests/npcs.js';
 import { QUESTS, fillTemplate, questSteps, stepAt } from './quests/quests.js';
 import { DAYS, questsOfDay, dayOfQuest, lockedRooms, isEvening } from './quests/days.js';
 import { GLOSSARY, validateGlossary } from './quests/glossary.js';
+import { BOOKS, validateBooks } from './quests/books.js';
 import { getMinigame } from './minigames/index.js';
 import * as store from './state.js';
 
@@ -99,6 +104,7 @@ export function createGame({ onNewGame }) {
   const office = buildOffice();
   scene.add(office.root);
   for (const q of QUESTS) validateSteps(q, office.spots);
+  validateBooks(office.spots);
   // Вид за окнами: небо и улица — декорация без теней и коллизий
   const sky = buildSky();
   scene.add(sky.root);
@@ -210,6 +216,27 @@ export function createGame({ onNewGame }) {
     render: renderKnowledgeBase,
     sections: () => knowledgeSections(),
     markSeen: store.markKbSeen,
+  });
+  // Коллекционные книги: лежат без маркеров на spots из office.js, найденные — в коллекции 🏆
+  const bookItems = BOOKS.map((book) => {
+    const spot = office.spots[book.spot];
+    const mesh = buildCollectibleBook(book);
+    mesh.group.position.set(spot.x, spot.y, spot.z);
+    mesh.group.rotation.y = spot.rot ?? 0;
+    scene.add(mesh.group);
+    return { book, mesh, spot };
+  });
+  const isBookFound = (id) => store.booksFound().includes(id);
+  const collectibles = createCollectibles({
+    items: bookItems,
+    player,
+    camera,
+    hud,
+    isFound: isBookFound,
+    markFound: store.markBookFound,
+    found: store.booksFound,
+    openModal,
+    render: renderTrophies,
   });
 
   const name = () => store.getState().name;
@@ -342,6 +369,8 @@ export function createGame({ onNewGame }) {
     for (const key of screenKeys) office.setScreenCrashed(key, broken.has(key));
     serverLight.color.set(serverFixed ? '#6bc5ff' : '#ff6b6b');
     serverLight.intensity = 6;
+    collectibles.sync();
+    hud.setTrophies(store.booksFound().length, BOOKS.length);
     hud.renderJournal(dayQuests(), NPCS, store.questStatus, {
       title: day().title,
       doneHint: exitHint(dayDone),
@@ -709,12 +738,14 @@ export function createGame({ onNewGame }) {
     else if (nearFire) { if (canExtinguish(nearFire)) extinguish(nearFire); }
     else if (nearExit) leaveOffice();
     else if (nearNpc) talk(nearNpc);
-    else if (!pingPong.interact() && !knowledge.interact()) props.interact();
+    else if (!pingPong.interact() && !collectibles.interact() && !knowledge.interact()) props.interact();
   }
   input.onAction(interact);
-  // Тап / клик по книжному шкафу открывает Базу знаний (рядом) или просит подойти ближе
+  // Тап / клик по коллекционной книге подбирает её, по книжному шкафу — открывает Базу знаний (рядом)
+  // или просит подойти ближе
   input.onTap((ndc) => {
-    if (!isModalOpen() && !props.busy && !player.seated && !cutscene) knowledge.tap(ndc);
+    if (isModalOpen() || props.busy || player.seated || cutscene) return;
+    if (!collectibles.tap(ndc)) knowledge.tap(ndc);
   });
 
   function markerPrompt(m) {
@@ -795,7 +826,7 @@ export function createGame({ onNewGame }) {
       hud.setPrompt(`${key}Поговорить: ${nearNpc.def.name}`);
       input.setActionVisible(true, '💬');
     } else {
-      const prop = pingPong.check() ?? knowledge.check() ?? props.check();
+      const prop = pingPong.check() ?? collectibles.check() ?? knowledge.check() ?? props.check();
       hud.setPrompt(prop ? `${prop.action ? key : ''}${prop.text}` : null);
       input.setActionVisible(Boolean(prop?.action), prop?.icon);
     }
@@ -895,6 +926,7 @@ export function createGame({ onNewGame }) {
     });
   }
   document.getElementById('menu-btn').addEventListener('click', () => { if (running) showMenu(); });
+  document.getElementById('trophy-btn').addEventListener('click', () => { if (running && !isModalOpen()) collectibles.open(); });
 
   // Отладочный доступ из консоли браузера (только в dev-сборке)
   if (import.meta.env.DEV) {
@@ -966,6 +998,9 @@ export function createGame({ onNewGame }) {
       pingPong: (npcId) => pingPong.start(npcId),
       knowledge: () => knowledge.open(),
       knowledgeNew: () => knowledge.newCount(),
+      books: () => collectibles.open(),
+      findBook: (id) => collectibles.pickById(id),
+      bookItems,
       npc: (id) => npcById(id),
       office,
     };
@@ -980,7 +1015,8 @@ export function createGame({ onNewGame }) {
       lastMarkerAuto = null;
       lastExitAuto = false;
       cutscene = null;
-      refresh();
+      refresh(); // в том числе книги на местах и бейдж 🏆
+      console.debug('[books] spawned', BOOKS.length - store.booksFound().length, 'of', BOOKS.length);
       placeNpcs();
       hud.show();
       running = true;

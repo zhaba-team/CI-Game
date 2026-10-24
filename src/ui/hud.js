@@ -1,4 +1,5 @@
-// HUD: журнал заданий, подсказка взаимодействия, подсказка захвата курсора, всплывающие уведомления, вспышка тревоги.
+// HUD: журнал заданий, бейдж коллекции книг 🏆, подсказка взаимодействия, подсказка захвата курсора,
+// всплывающие уведомления, вспышка тревоги.
 import { h } from './dom.js';
 import { QuestStatus } from '../state.js';
 
@@ -14,6 +15,10 @@ export function createHud() {
   const prompt = document.getElementById('prompt');
   const toasts = document.getElementById('toasts');
   const lockHint = document.getElementById('lock-hint');
+  const trophyBtn = document.getElementById('trophy-btn');
+  const trophyCount = trophyBtn.querySelector('.trophy-count');
+  let trophiesFound = null; // прошлое значение бейджа: пульс — только при новой находке
+  trophyBtn.addEventListener('animationend', () => trophyBtn.classList.remove('bump'));
   let collapsed = window.innerWidth < 640;
   const flash = h('div', { class: 'alarm-flash hidden' });
   hud.append(flash);
@@ -40,6 +45,17 @@ export function createHud() {
       const bar = h('div', { class: 'bar' }, h('div', { style: { width: `${(done / quests.length) * 100}%` } }));
       journal.replaceChildren(header, bar, h('ul', {}, items));
       journal.classList.toggle('collapsed', collapsed);
+    },
+
+    // Бейдж «найдено/всего» на кнопке коллекции книг
+    setTrophies(found, total) {
+      trophyCount.textContent = `${found}/${total}`;
+      if (trophiesFound !== null && found > trophiesFound) {
+        trophyBtn.classList.remove('bump');
+        void trophyBtn.offsetWidth; // перезапуск анимации
+        trophyBtn.classList.add('bump');
+      }
+      trophiesFound = found;
     },
 
     setPrompt(text) {

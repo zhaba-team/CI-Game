@@ -440,6 +440,8 @@ export function buildOffice() {
   // Помощники для модулей наполнения комнат (gameRoom.js, decor.js)
   const ctx = { root, solid, solidFrom, occluders, spots, animated, plant };
   const gameRoom = buildGameRoom(ctx, ROOMS.gameRoom);
+  // Коллекционная книга — на тумбе ТВ Игровой (верх 0.5, центр x −20.5, z 8.55) слева от телевизора, под краем экрана
+  spots.bookModernOs = { x: -21.45, y: 0.5, z: 8.5, rot: 0.35 };
 
   // Ряды столов в open-space
   const screens = ['#2b5d8a', '#3a7a4f', '#5b3a8a', '#2b5d8a', '#8a5b2b', '#2b6d7a'];
@@ -533,6 +535,8 @@ export function buildOffice() {
   fridge.position.set(-15.45, 0, 11.4);
   root.add(fridge);
   solidFrom(fridge, 0.05);
+  // Коллекционная книга (quests/books.js) — сверху на холодильнике
+  spots.bookGrokking = { x: -15.5, y: 1.9, z: 11.35, rot: 0.4 };
   root.add(cyl(0.22, 0.22, 1.1, 8, '#ffffff', -15.4, 0, 5.1));
   root.add(cyl(0.2, 0.2, 0.5, 8, '#8ecae6', -15.4, 1.1, 5.1, mat('#8ecae6', { transparent: true, opacity: 0.8 })));
   solid(-15.7, 4.8, -15.1, 5.4);
@@ -580,6 +584,8 @@ export function buildOffice() {
   root.add(box(2.6, 1.05, 0.7, '#2e9e5b', -4, 0, 10));
   root.add(box(2.7, 0.06, 0.8, '#f4f1ea', -4, 1.05, 10));
   solid(-5.35, 9.6, -2.65, 10.4);
+  // Коллекционная книга — на полу за стойкой, у южной стены
+  spots.bookCleanCode = { x: -4.6, y: 0, z: 11.2, rot: -0.3 };
 
   // Выход из офиса на южной стене между ресепшеном и растением. Декор в плоскости стены:
   // коллайдер даёт сама стена, а маркер выхода ставит game.js в spots.exit
@@ -614,6 +620,9 @@ export function buildOffice() {
   );
   bossChair.position.set(12, 0, -9.7);
   root.add(bossChair);
+  // Коллекционная книга — на полу под столом у кресла (от двери её закрывает панель стола).
+  // Дальше TALK_RADIUS от spots.director, иначе подсказку «Взять книгу» перебивает разговор с Ильёй
+  spots.bookCleanArch = { x: 12.3, y: 0, z: -8.9, rot: 0.5 };
   root.add(box(0.45, 2.1, 1.2, '#6b4f36', 15.6, 0, -6));
   solid(15.3, -6.6, 16, -5.4);
   plant(15.2, -11.2, 1.2);
@@ -647,6 +656,8 @@ export function buildOffice() {
     for (const x of [9, 11]) rack(x, z);
   }
   for (const z of [3, 5.5, 8]) rack(15.2, z);
+  // Коллекционная книга — на полу в щели между стойками у восточной стены
+  spots.bookDdia = { x: 15.2, y: 0, z: 4.25, rot: 1.2 };
   // Пульт администратора
   const consoleDesk = group(box(1.6, 0.75, 0.7, '#2b3038', 0, 0, 0));
   consoleDesk.add(monitor(-0.35, -0.1, 0, '#0b1f12'));
