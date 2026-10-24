@@ -4,10 +4,19 @@ services:
     container_name: traefik
     restart: unless-stopped
     command:
-      - --api.insecure=true
+      - --api.insecure=false
       - --providers.docker=true
-      - --providers.docker.exposedByDefault=false
       - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --certificatesresolvers.myresolver.acme.email=test@gmail.com
+      - --certificatesresolvers.myresolver.acme.storage=/acme.json
+      - --certificatesresolvers.myresolver.acme.httpchallenge=true
+      - --certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web
+      - --accesslog=true
+      - --accesslog.filters.statuscodes=400-599
+      - --log.level=WARN
     ports:
       - target: 80
         published: 80
