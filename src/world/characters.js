@@ -3,23 +3,27 @@
 import * as THREE from 'three';
 import { mat, box, ico, textPlane } from './lowpoly.js';
 
-// Цвета — hex-строки. Поля одежды collar / belt / cargo / soles / chestText по умолчанию выключены (null).
+// Цвета — hex-строки. Поля одежды collar / belt / cargo / soles / socks / shoeStripe / chestText
+// по умолчанию выключены (null).
 const DEFAULT_STYLE = {
   skin: '#f1c7a1',
   shirt: '#3f8f5f',
   pants: '#2f3a4a',
   shoes: '#222222',
   hair: '#3b2a20',
-  hairStyle: 'short', // short | parted | long | bun | spiky | none
-  beardStyle: 'none', // none | full | goatee | stubble
+  hairStyle: 'short', // short | parted | quiff | long | bun | spiky | none
+  beardStyle: 'none', // none | full | trimmed | goatee | stubble
   beardColor: null,   // по умолчанию — цвет hair
   mouth: 'smile',     // smile | grin | neutral
+  glassesStyle: 'classic', // classic | bold — вид аксессуара glasses
   accent: '#ffffff',
   accessories: [],    // glasses | beard | beret | beanie | headphones | tie | jacket | backpack | badge | scarf | hood
   collar: null,       // расстёгнутый ворот рубашки (цвет)
   belt: null,         // ремень с пряжкой (цвет)
   cargo: null,        // боковые карманы на штанах (цвет)
   soles: null,        // светлая подошва кроссовок (цвет)
+  socks: null,        // видимые носки между штаниной и обувью (цвет)
+  shoeStripe: null,   // полоса по бокам кед (цвет)
   sleeves: 'long',    // long | short
   chestText: null,    // надпись на груди (строка)
   chestTextColor: '#ffffff',
@@ -27,9 +31,10 @@ const DEFAULT_STYLE = {
   height: 1,
 };
 
-const HAIR_STYLES = ['short', 'parted', 'long', 'bun', 'spiky', 'none'];
-const BEARD_STYLES = ['none', 'full', 'goatee', 'stubble'];
+const HAIR_STYLES = ['short', 'parted', 'quiff', 'long', 'bun', 'spiky', 'none'];
+const BEARD_STYLES = ['none', 'full', 'trimmed', 'goatee', 'stubble'];
 const MOUTHS = ['smile', 'grin', 'neutral'];
+const GLASSES_STYLES = ['classic', 'bold'];
 const SLEEVES = ['long', 'short'];
 const ACCESSORIES = ['glasses', 'beard', 'beret', 'beanie', 'headphones', 'tie', 'jacket', 'backpack', 'badge', 'scarf', 'hood'];
 
@@ -41,6 +46,7 @@ function warnUnknownStyle(s) {
   check('hairStyle', s.hairStyle, HAIR_STYLES);
   check('beardStyle', s.beardStyle, BEARD_STYLES);
   check('mouth', s.mouth, MOUTHS);
+  check('glassesStyle', s.glassesStyle, GLASSES_STYLES);
   check('sleeves', s.sleeves, SLEEVES);
   s.accessories.forEach((a) => check('accessories', a, ACCESSORIES));
 }
@@ -71,6 +77,19 @@ function addHair(head, s) {
       for (const sx of [-1, 1]) head.add(box(0.03, 0.17, 0.3, c, sx * 0.21, 0.3, -0.035)); // виски над зоной ушей
       head.add(box(0.42, 0.3, 0.04, c, 0, 0.17, -0.195));   // затылок
       head.add(box(0.34, 0.07, 0.03, c, 0, 0.11, -0.185));  // сужение к шее
+      break;
+    }
+    case 'quiff': {
+      // Квифф: объёмный верх зачёсан вверх-назад, виски и затылок коротко (фейд).
+      // Шапка уже головы по x/z — без совпадающих граней.
+      head.add(box(0.36, 0.1, 0.34, c, 0, 0.47, -0.02));
+      const lift = box(0.34, 0.1, 0.12, c, 0, 0.5, 0.11); // передний край выше заднего — читается в профиль
+      lift.rotation.x = -0.35;
+      head.add(lift);
+      const fade = mat(c, { transparent: true, opacity: 0.55 });
+      for (const sx of [-1, 1]) head.add(box(0.012, 0.175, 0.28, null, sx * 0.205, 0.3, -0.03, fade)); // виски до шапки
+      head.add(box(0.4, 0.24, 0.012, null, 0, 0.18, -0.197, fade)); // затылок
+      head.add(box(0.38, 0.08, 0.04, c, 0, 0.4, -0.18));             // сплошная полоса над затылком
       break;
     }
     case 'long':
@@ -112,6 +131,15 @@ function addBeard(head, s) {
       head.add(box(0.42, 0.16, 0.08, c, 0, -0.02, 0.17));
       head.add(box(0.16, 0.04, 0.03, c, 0, 0.12, 0.2));
       break;
+    case 'trimmed':
+      // Короткая аккуратная борода по линии челюсти с усами; рот между ними остаётся виден
+      head.add(box(0.41, 0.1, 0.07, c, 0, -0.02, 0.165)); // подбородок
+      for (const sx of [-1, 1]) {
+        head.add(box(0.025, 0.17, 0.24, c, sx * 0.205, -0.015, 0.06)); // челюсть и скулы
+        head.add(box(0.04, 0.07, 0.03, c, sx * 0.1, 0.06, 0.195));     // переход к усам
+      }
+      head.add(box(0.2, 0.035, 0.03, c, 0, 0.125, 0.2)); // усы
+      break;
     case 'goatee':
       head.add(box(0.2, 0.15, 0.1, c, 0, -0.08, 0.16));     // клин на подбородке
       head.add(box(0.22, 0.04, 0.03, c, 0, 0.135, 0.2));    // усы
@@ -145,7 +173,7 @@ function addMouth(head, s) {
   }
 }
 
-// Детали одежды: ворот, ремень, карманы-карго, подошвы. Каждая включается своим цветом в style.
+// Детали одежды: ворот, ремень, карманы-карго, подошвы, полосы на кедах. Каждая включается своим цветом в style.
 function addClothes(parts, s) {
   const { torso, legL, legR } = parts;
   if (s.collar) {
@@ -166,6 +194,10 @@ function addClothes(parts, s) {
       leg.add(box(0.055, 0.04, 0.18, s.cargo, sx * 0.11 * s.build, -0.34, 0)); // клапан
     }
     if (s.soles) leg.add(box(0.23 * s.build, 0.04, 0.31, s.soles, 0, -0.82, 0.04));
+    // Полоса снаружи и изнутри кеда, над подошвой (подошва — до y −0.78)
+    if (s.shoeStripe) {
+      for (const side of [-1, 1]) leg.add(box(0.008, 0.03, 0.2, s.shoeStripe, side * (0.11 * s.build + 0.004), -0.78, 0.04));
+    }
   }
 }
 
@@ -178,19 +210,41 @@ function addChestText(parts, s) {
   parts.torso.add(plane);
 }
 
+const LENS = { transparent: true, opacity: 0.55 };
+
+// Тонкая оправа с линзами, закрывающими глаза
+function addClassicGlasses(head, frame) {
+  head.add(box(0.14, 0.1, 0.03, frame, -0.1, 0.2, 0.2));
+  head.add(box(0.14, 0.1, 0.03, frame, 0.1, 0.2, 0.2));
+  head.add(box(0.06, 0.02, 0.03, frame, 0, 0.24, 0.2));
+  const lens = mat('#bfe6ff', LENS);
+  head.add(box(0.1, 0.06, 0.01, null, -0.1, 0.22, 0.217, lens));
+  head.add(box(0.1, 0.06, 0.01, null, 0.1, 0.22, 0.217, lens));
+}
+
+// Толстая оправа-рамка: глаза видны сквозь линзу, дужки до ушей
+function addBoldGlasses(head, frame) {
+  const lens = mat('#bfe6ff', LENS);
+  for (const sx of [-1, 1]) {
+    const x = sx * 0.1;
+    head.add(box(0.16, 0.03, 0.035, frame, x, 0.29, 0.21));  // верх оправы
+    head.add(box(0.16, 0.025, 0.035, frame, x, 0.19, 0.21)); // низ оправы
+    for (const side of [-1, 1]) head.add(box(0.025, 0.125, 0.035, frame, x + side * 0.0675, 0.19, 0.21));
+    head.add(box(0.11, 0.075, 0.006, null, x, 0.215, 0.222, lens));
+    head.add(box(0.045, 0.02, 0.025, frame, sx * 0.1925, 0.271, 0.21)); // шарнир: соединяет оправу с дужкой
+    head.add(box(0.015, 0.022, 0.22, frame, sx * 0.21, 0.27, 0.09));    // дужка
+  }
+  head.add(box(0.05, 0.022, 0.03, frame, 0, 0.25, 0.215)); // перемычка
+}
+
 function addAccessories(root, parts, s) {
   const { head, torso } = parts;
   const has = (a) => s.accessories.includes(a);
   const dark = '#1d1d1d';
 
   if (has('glasses')) {
-    const frame = s.glassesColor ?? dark;
-    head.add(box(0.14, 0.1, 0.03, frame, -0.1, 0.2, 0.2));
-    head.add(box(0.14, 0.1, 0.03, frame, 0.1, 0.2, 0.2));
-    head.add(box(0.06, 0.02, 0.03, frame, 0, 0.24, 0.2));
-    const lens = mat('#bfe6ff', { transparent: true, opacity: 0.55 });
-    head.add(box(0.1, 0.06, 0.01, null, -0.1, 0.22, 0.217, lens));
-    head.add(box(0.1, 0.06, 0.01, null, 0.1, 0.22, 0.217, lens));
+    const addGlasses = s.glassesStyle === 'bold' ? addBoldGlasses : addClassicGlasses;
+    addGlasses(head, s.glassesColor ?? dark);
   }
   if (has('beret')) {
     const beret = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.25, 0.09, 8), mat(s.accent));
@@ -257,9 +311,13 @@ export function createCharacter(styleOverrides = {}) {
   const legR = limb(0.2 * b, 0.72, 0.22, s.pants, 0.82, 0.13 * b);
   legL.add(box(0.22 * b, 0.1, 0.3, s.shoes, 0, -0.82, 0.04));
   legR.add(box(0.22 * b, 0.1, 0.3, s.shoes, 0, -0.82, 0.04));
-  // Манжета джинсов чуть шире штанины и ложится на верх кроссовка — без совпадающих граней
-  legL.add(box(0.215 * b, 0.05, 0.235, s.pants, 0, -0.74, 0));
-  legR.add(box(0.215 * b, 0.05, 0.235, s.pants, 0, -0.74, 0));
+  // Манжета джинсов чуть шире штанины и ложится на верх кроссовка — без совпадающих граней.
+  // Укороченная штанина: между манжетой и кедом видна полоска носка.
+  const cuffY = s.socks ? -0.62 : -0.74;
+  for (const leg of [legL, legR]) {
+    leg.add(box(0.215 * b, 0.05, 0.235, s.pants, 0, cuffY, 0));
+    if (s.socks) leg.add(box(0.21 * b, 0.115, 0.228, s.socks, 0, -0.735, 0));
+  }
 
   // Всё, что добавлено в torso (пиджак, ремень, ворот…), масштабируется вместе с ним
   const torso = new THREE.Group();
