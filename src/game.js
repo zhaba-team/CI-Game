@@ -193,7 +193,6 @@ export function createGame({ onNewGame }) {
   // ---------- Взаимодействие ----------
   let nearNpc = null;
   let nearMarker = null;
-  let lastNpcAuto = null;
   let lastMarkerAuto = null;
 
   function interact() {
@@ -219,20 +218,14 @@ export function createGame({ onNewGame }) {
     }
 
     if (isModalOpen()) return;
-    // Автооткрытие окна при подходе — один раз, пока игрок не отойдёт
+    // Автооткрытие мини-игры при подходе к маркеру — один раз, пока игрок не отойдёт.
+    // Диалог с NPC открывается только по действию (E / 💬).
     if (nearMarker && lastMarkerAuto !== nearMarker.id) {
       lastMarkerAuto = nearMarker.id;
       openMinigame(nearMarker);
       return;
     }
     if (!nearMarker) lastMarkerAuto = null;
-    const nearId = nearNpc?.def.id ?? null;
-    if (nearNpc && lastNpcAuto !== nearId) {
-      lastNpcAuto = nearId;
-      const quest = QUESTS.find((q) => q.npc === nearId);
-      if (store.questStatus(quest.id) === QuestStatus.AVAILABLE) { talk(nearNpc); return; }
-    }
-    if (!nearNpc) lastNpcAuto = null;
 
     const key = input.state.isTouch ? '' : 'E — ';
     if (nearMarker) {
@@ -290,7 +283,7 @@ export function createGame({ onNewGame }) {
       title: `Добро пожаловать, ${name()}!`,
       subtitle: 'IT-компания «жыбий рыр», первый день стажировки',
       body: h('div', { class: 'lesson' },
-        h('p', {}, 'Ты — новый стажёр-программист. Познакомься с командой: у коллег с жёлтым знаком «!» над головой есть для тебя задания. Выполнять их можно в любом порядке.'),
+        h('p', {}, `Ты — новый стажёр-программист. Познакомься с командой: у коллег с жёлтым знаком «!» над головой есть для тебя задания. Подойди к коллеге и ${input.state.isTouch ? 'нажми 💬' : 'нажми E'}, чтобы поговорить. Выполнять задания можно в любом порядке.`),
         h('div', { class: 'controls' },
           input.state.isTouch
             ? [h('div', {}, '🕹️ Стик слева — ходить'), h('div', {}, '👆 Проведи по экрану — повернуть камеру'), h('div', {}, '💬 Кнопка справа — говорить')]
@@ -354,7 +347,6 @@ export function createGame({ onNewGame }) {
       const spawn = office.spots.spawn;
       if (s.player && !fresh) player.place(s.player.x, s.player.z, s.player.heading);
       else player.place(spawn.x, spawn.z, spawn.face);
-      lastNpcAuto = null;
       lastMarkerAuto = null;
       refresh();
       hud.show();
@@ -379,9 +371,6 @@ export function createGame({ onNewGame }) {
     for (const q of QUESTS) {
       const m = markers.get(q.id).position;
       if (store.questStatus(q.id) === QuestStatus.ACTIVE && Math.hypot(m.x - p.x, m.z - p.z) < MARKER_RADIUS) lastMarkerAuto = q.id;
-    }
-    for (const npc of npcs) {
-      if (Math.hypot(npc.position.x - p.x, npc.position.z - p.z) < TALK_RADIUS) lastNpcAuto = npc.def.id;
     }
   }
 }
