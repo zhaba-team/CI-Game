@@ -347,10 +347,12 @@ export function buildOffice() {
     mesh.instanceMatrix.needsUpdate = true;
     mesh.frustumCulled = false; // bounding sphere в r169 не учитывает инстансы
     root.add(mesh);
+    return mesh;
   };
   lampMesh(new THREE.BoxGeometry(LAMP_FRAME, LAMP_DROP, LAMP_FRAME), mat('#d9dde0', { metalness: 0.3, roughness: 0.5 }), WALL_H - LAMP_DROP / 2);
   // Рассеиватель на 5 мм ниже рамки, чтобы не было z-fighting
-  lampMesh(new THREE.BoxGeometry(LAMP, 0.01, LAMP), glow('#f4f8ff', 1.1), WALL_H - LAMP_DROP - 0.005);
+  const LAMP_GLOW = { day: glow('#f4f8ff', 1.1), evening: glow('#f4f8ff', 1.4) };
+  const diffusers = lampMesh(new THREE.BoxGeometry(LAMP, 0.01, LAMP), LAMP_GLOW.day, WALL_H - LAMP_DROP - 0.005);
 
   // Один мягкий источник на помещение вместо света на каждую лампу:
   // 83 PointLight убили бы FPS на мобильных. Серверную освещает serverLight из game.js.
@@ -361,6 +363,12 @@ export function buildOffice() {
   const gameRoomLight = new THREE.PointLight('#ffeef6', 12, 14, 1);
   gameRoomLight.position.set((game.x0 + game.x1) / 2, WALL_H - 0.5, (game.z0 + game.z1) / 2);
   root.add(openSpaceLight, directorLight, gameRoomLight);
+  // Вечером за окнами темнее — светильники кажутся ярче. Новых источников не добавляем
+  const roomLights = [openSpaceLight, directorLight, gameRoomLight].map((light) => ({ light, day: light.intensity }));
+  const setEvening = (on) => {
+    for (const { light, day } of roomLights) light.intensity = on ? day * 1.25 : day;
+    diffusers.material = on ? LAMP_GLOW.evening : LAMP_GLOW.day;
+  };
 
   // ---------- Мебель ----------
   const monitor = (x, z, rot, screenColor = '#2b5d8a') => {
@@ -372,6 +380,7 @@ export function buildOffice() {
     const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.82, 0.47), glow(screenColor, 0.8));
     screen.position.set(0, 0.555, 0.032);
     g.add(screen);
+    g.userData.screen = screen;
     g.position.set(x, 0.76, z);
     g.rotation.y = rot;
     return g;
@@ -391,12 +400,14 @@ export function buildOffice() {
 
   // Рабочее место: стол + монитор + стул; facing — куда смотрит сидящий (+1 → +z)
   const deskCenters = []; // для мелочей на столах (decor.js)
+  const deskScreens = new Map(); // точка рабочего места → { screen, normal } — экран монитора и его обычный материал
   const desk = (x, z, facing = 1, screenColor) => {
     deskCenters.push({ x, z });
     const g = new THREE.Group();
     g.add(box(1.8, 0.06, 0.9, '#f4f1ea', 0, 0.72, 0));
     [[-0.82, -0.38], [0.82, -0.38], [-0.82, 0.38], [0.82, 0.38]].forEach(([lx, lz]) => g.add(box(0.06, 0.72, 0.06, '#7a7a7a', lx, 0, lz)));
-    g.add(monitor(0, -0.2 * facing, facing > 0 ? 0 : Math.PI, screenColor));
+    const mon = monitor(0, -0.2 * facing, facing > 0 ? 0 : Math.PI, screenColor);
+    g.add(mon);
     g.add(box(0.5, 0.03, 0.16, '#3a3a3a', 0, 0.78, 0.12 * facing)); // клавиатура
     g.add(box(0.08, 0.03, 0.12, '#3a3a3a', 0.4, 0.78, 0.12 * facing)); // мышь
     g.position.set(x, 0, z);
@@ -404,7 +415,10 @@ export function buildOffice() {
     solidFrom(g, 0.05);
     const c = chair(x, z + 0.85 * facing, facing > 0 ? Math.PI : 0);
     root.add(c);
-    return { x, z: z + 1.25 * facing };
+    const spot = { x, z: z + 1.25 * facing };
+    const { screen } = mon.userData;
+    deskScreens.set(spot, { screen, normal: screen.material });
+    return spot;
   };
 
   const plant = (x, z, s = 1) => {
@@ -443,6 +457,24 @@ export function buildOffice() {
   spots.deskDesign = deskSpots[1];
   spots.deskBug = deskSpots[6];
   spots.deskFeature = deskSpots[3];
+  spots.deskRelease = deskSpots[7]; // ближайший к тимлиду свободный стол (x −4.5, z −1.5)
+
+  // Синий экран на мониторе рабочего места: надпись создаётся лениво, материалы — из кэша glow()
+  const CRASH_GLOW = glow('#0b2fa8', 0.9);
+  const setScreenCrashed = (spotKey, crashed) => {
+    const entry = deskScreens.get(spots[spotKey]);
+    if (!entry) throw new Error(`У точки «${spotKey}» нет монитора рабочего места`);
+    if (crashed && !entry.text) {
+      const sad = textPlane(':(', { height: 0.16, size: 96 });
+      sad.position.set(-0.28, 0.08, 0.002);
+      const stop = textPlane('STOP 0x0000F12D', { height: 0.05, size: 48 });
+      stop.position.set(-0.12, -0.12, 0.002);
+      entry.text = group(sad, stop);
+      entry.screen.add(entry.text);
+    }
+    entry.screen.material = crashed ? CRASH_GLOW : entry.normal;
+    if (entry.text) entry.text.visible = crashed;
+  };
 
   // Канбан-доска менеджера с цветными стикерами
   const board = group(box(2.6, 1.5, 0.08, '#ffffff', 0, 0.9, 0));
@@ -458,6 +490,8 @@ export function buildOffice() {
 
   // Тимлид у своего стола
   spots.teamlead = { x: -2.5, z: -4.6, face: Math.PI * 0.6 };
+  // Куда тимлид подходит к игроку у deskRelease в пятницу: сбоку от стула, лицом к игроку; path — точки по пути от стола
+  spots.teamleadRelease = { x: -3.3, z: 0.35, face: Math.atan2(-1.2, -0.6), path: [{ x: -2.6, z: -1.0 }] };
   root.add(box(1.6, 1.8, 0.4, '#6b4f36', SHELF_X, 0, -11.6)); // шкаф с книгами
   for (let k = 0; k < 4; k++) {
     root.add(box(1.5, 0.04, 0.38, '#5a412c', SHELF_X, 0.4 + k * 0.45, -11.55));
@@ -662,7 +696,7 @@ export function buildOffice() {
   };
 
   return {
-    root, colliders, occluders, spots, animated, setServerFixed, setLocks, setExtinguisherOnWall, ceilingHeight: WALL_H, outline,
+    root, colliders, occluders, spots, animated, setServerFixed, setScreenCrashed, setEvening, setLocks, setExtinguisherOnWall, ceilingHeight: WALL_H, outline,
     seats: gameRoom.seats,
     coffee: gameRoom.coffee,
   };

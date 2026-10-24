@@ -5,6 +5,8 @@ import findBug from './findBug.js';
 import pipeline from './pipeline.js';
 import greeting from './greeting.js';
 import infraConfig from './infraConfig.js';
+import hotfix from './hotfix.js';
+import releaseDeploy from './releaseDeploy.js';
 
 const registry = new Map();
 
@@ -18,4 +20,4 @@ export function getMinigame(id) {
   return mg;
 }
 
-[paintButton, findBug, pipeline, greeting, infraConfig].forEach(registerMinigame);
+[paintButton, findBug, pipeline, greeting, infraConfig, hotfix, releaseDeploy].forEach(registerMinigame);

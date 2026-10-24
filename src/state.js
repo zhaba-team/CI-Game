@@ -99,10 +99,12 @@ export function setDayIntroShown() {
   persist();
 }
 
-// Следующий рабочий день: игрок начинает его со спавна
+// Следующий рабочий день: игрок начинает его со спавна. Сейв, пройденный до появления новых дней,
+// снова становится незавершённым
 export function advanceDay() {
   state.day += 1;
   state.dayIntroShown = false;
+  state.finished = false;
   state.player = null;
   persist();
   listeners.forEach((fn) => fn(state));

@@ -25,29 +25,34 @@ export function closeModal() {
 
 /**
  * @param {object} o
- * @param {string} o.title
+ * @param {string} [o.title]  — пустой заголовок не рендерится
  * @param {string} [o.subtitle]
  * @param {string} [o.badge]   — цветная плашка рядом с заголовком (например, роль NPC)
  * @param {Node|string} o.body
  * @param {Array<{label:string, primary?:boolean, onClick?:Function}>} [o.actions]
  * @param {boolean} [o.wide]
  * @param {Function} [o.onClose]
+ * @param {boolean} [o.closable] — false: нет ✕, окно не закрывается кликом по фону и Esc
+ * @param {string} [o.variant]   — особый вид окна: классы modal--<variant> и modal-backdrop--<variant>
  */
-export function openModal({ title, subtitle, badge, body, actions = [], wide = false, onClose, closable = true }) {
+export function openModal({ title, subtitle, badge, body, actions = [], wide = false, onClose, closable = true, variant }) {
   if (current) closeModal();
   const footer = h('div', { class: 'modal-actions' });
-  const card = h('div', { class: `modal${wide ? ' wide' : ''}`, role: 'dialog', 'aria-modal': 'true' },
-    h('div', { class: 'modal-head' },
+  const head = title || subtitle || closable
+    ? h('div', { class: 'modal-head' },
       h('div', {},
-        h('h2', {}, title, badge ? h('span', { class: 'badge' }, badge) : null),
+        title ? h('h2', {}, title, badge ? h('span', { class: 'badge' }, badge) : null) : null,
         subtitle ? h('div', { class: 'modal-sub' }, subtitle) : null,
       ),
       closable ? h('button', { class: 'modal-x', 'aria-label': 'Закрыть', onclick: closeModal }, '✕') : null,
-    ),
+    )
+    : null;
+  const card = h('div', { class: `modal${wide ? ' wide' : ''}${variant ? ` modal--${variant}` : ''}`, role: 'dialog', 'aria-modal': 'true' },
+    head,
     h('div', { class: 'modal-body' }, body),
     footer,
   );
-  const el = h('div', { class: 'modal-backdrop' }, card);
+  const el = h('div', { class: `modal-backdrop${variant ? ` modal-backdrop--${variant}` : ''}` }, card);
   if (closable) el.addEventListener('pointerdown', (e) => { if (e.target === el) closeModal(); });
   root().append(el);
 

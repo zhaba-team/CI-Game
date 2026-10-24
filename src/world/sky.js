@@ -1,11 +1,12 @@
 // Небо за окнами: купол с градиентом, low-poly облака и дальние холмы.
-// Лёгкая декорация: без теней и коллизий.
+// Лёгкая декорация: без теней и коллизий. setEvening(on) перекрашивает небо и облака в закат.
 import * as THREE from 'three';
 import { mat, createRng } from './lowpoly.js';
 
 const SKY_R = 140;
-const ZENITH = new THREE.Color('#4f9fe0');
-const HORIZON = new THREE.Color('#d8eeff');
+// Палитры неба: днём — голубое, вечером — персиковый горизонт и сине-лиловый зенит
+export const SKY_DAY = { horizon: '#d8eeff', zenith: '#4f9fe0' };
+export const SKY_EVENING = { horizon: '#ffb37a', zenith: '#3b3f7a' };
 const HILL_COLORS = ['#6f9e6a', '#5d8c63', '#7fae7a'];
 
 // Готовый InstancedMesh без теней, с bounding sphere по инстансам (frustum culling работает)
@@ -35,14 +36,20 @@ export function buildSky() {
   // Купол: вертикальный градиент вершинными цветами, ниже горизонта — цвет горизонта (скрыт землёй)
   const domeGeometry = new THREE.SphereGeometry(SKY_R, 24, 12);
   const pos = domeGeometry.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
+  const colors = new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3);
+  domeGeometry.setAttribute('color', colors);
   const c = new THREE.Color();
-  for (let k = 0; k < pos.count; k++) {
-    const t = Math.max(0, pos.getY(k) / SKY_R);
-    c.lerpColors(HORIZON, ZENITH, Math.pow(t, 0.7));
-    c.toArray(colors, k * 3);
-  }
-  domeGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const paint = ({ horizon, zenith }) => {
+    const h = new THREE.Color(horizon);
+    const z = new THREE.Color(zenith);
+    for (let k = 0; k < pos.count; k++) {
+      const t = Math.max(0, pos.getY(k) / SKY_R);
+      c.lerpColors(h, z, Math.pow(t, 0.7));
+      c.toArray(colors.array, k * 3);
+    }
+    colors.needsUpdate = true;
+  };
+  paint(SKY_DAY);
   // Исключение из mat(): небу не нужно освещение, а flatShading дал бы полосы
   const dome = new THREE.Mesh(domeGeometry, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, depthWrite: false, fog: false }));
   dome.renderOrder = -1;
@@ -60,11 +67,13 @@ export function buildSky() {
     };
   });
   const clouds = new THREE.Group();
-  clouds.add(instanced(
-    new THREE.IcosahedronGeometry(1, 0),
-    mat('#ffffff', { emissive: '#ffffff', emissiveIntensity: 0.35, roughness: 1 }),
-    cloudTransforms,
-  ));
+  // Вечером облака подсвечены закатом: отдельный кэшированный материал, дневной не мутируем
+  const CLOUD = {
+    day: mat('#ffffff', { emissive: '#ffffff', emissiveIntensity: 0.35, roughness: 1 }),
+    evening: mat('#ffd2c2', { emissive: '#ff9f7a', emissiveIntensity: 0.45, roughness: 1 }),
+  };
+  const cloudMesh = instanced(new THREE.IcosahedronGeometry(1, 0), CLOUD.day, cloudTransforms);
+  clouds.add(cloudMesh);
   root.add(clouds);
 
   // Холмы по кругу: наполовину в земле, прячут край газона у горизонта
@@ -86,6 +95,10 @@ export function buildSky() {
     root,
     update(time) {
       clouds.rotation.y = time * 0.003;
+    },
+    setEvening(on) {
+      paint(on ? SKY_EVENING : SKY_DAY);
+      cloudMesh.material = on ? CLOUD.evening : CLOUD.day;
     },
   };
 }

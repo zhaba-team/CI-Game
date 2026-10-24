@@ -1,9 +1,9 @@
 // Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов,
-// шаги многошаговых квестов (диалог, предмет, тушение огня, мини-игра),
-// рабочие дни (интро, итоги, переход к следующему дню) и финал.
+// шаги многошаговых квестов (диалог, подход NPC, предмет, тушение огня, мини-игра, полноэкранная сцена),
+// рабочие дни (интро, итоги, переход к следующему дню, вечер) и финал.
 import * as THREE from 'three';
 import { buildOffice } from './world/office.js';
-import { buildSky } from './world/sky.js';
+import { buildSky, SKY_DAY, SKY_EVENING } from './world/sky.js';
 import { buildOutdoor } from './world/outdoor.js';
 import { createPlayer } from './world/player.js';
 import { createNpc, createQuestMarker } from './world/npc.js';
@@ -13,9 +13,10 @@ import { createProps } from './flow/props.js';
 import { createHud } from './ui/hud.js';
 import { h } from './ui/dom.js';
 import { openModal, closeModal, onModalChange, isModalOpen } from './ui/modal.js';
+import { SCREENS } from './ui/screens.js';
 import { NPCS } from './quests/npcs.js';
 import { QUESTS, fillTemplate, questSteps, stepAt } from './quests/quests.js';
-import { DAYS, questsOfDay, dayOfQuest, lockedRooms } from './quests/days.js';
+import { DAYS, questsOfDay, dayOfQuest, lockedRooms, isEvening } from './quests/days.js';
 import { getMinigame } from './minigames/index.js';
 import * as store from './state.js';
 
@@ -23,7 +24,15 @@ const { QuestStatus } = store;
 const TALK_RADIUS = 2.0;
 const MARKER_RADIUS = 0.8;
 const FIRE_RADIUS = 1.6;
-const STEP_TYPES = ['talk', 'pickup', 'hazard', 'minigame'];
+const STEP_TYPES = ['talk', 'pickup', 'hazard', 'minigame', 'screen'];
+const NPC_HALF = 0.3; // половина стороны квадратного коллайдера NPC
+// Свет дня и вечера (quests/days.js, evening): солнце, небесный свет и фон под куполом неба.
+// Вечернее солнце низко на западе и светит в западные окна; позиция дальше по лучу, чтобы Игровая
+// попадала в рамку теней (near/far ниже)
+const LIGHTING = {
+  day: { sun: '#fff4e0', sunIntensity: 1.2, sunPos: [-8, 18, 6], sky: '#ffffff', ground: '#c9b391', hemi: 1.0, background: SKY_DAY.horizon },
+  evening: { sun: '#ff9a5a', sunIntensity: 0.7, sunPos: [-27, 10.5, 6], sky: '#ffd9c0', ground: '#7a6a8a', hemi: 0.75, background: SKY_EVENING.horizon },
+};
 
 // Ошибки в данных многошагового квеста ловим при старте, а не посреди сюжета
 // «4 дня», «5 дней»
@@ -39,7 +48,12 @@ function validateSteps(quest, spots) {
     if (!STEP_TYPES.includes(step.type)) throw new Error(`${where}: неизвестный type «${step.type}»`);
     if (step.type === 'talk' && !NPCS.some((n) => n.id === step.npc)) throw new Error(`${where}: у шага talk нет npc из npcs.js`);
     if (step.type === 'talk' && !step.lines?.length) throw new Error(`${where}: у шага talk нет lines`);
-    if (step.type !== 'hazard' && !spots[step.spot]) throw new Error(`${where}: нет точки «${step.spot}» в office.spots`);
+    if (step.type !== 'hazard' && step.type !== 'screen' && !spots[step.spot]) throw new Error(`${where}: нет точки «${step.spot}» в office.spots`);
+    if (step.type === 'screen' && !SCREENS[step.screen]) throw new Error(`${where}: сцена «${step.screen}» не зарегистрирована в ui/screens.js`);
+    if (step.type === 'screen' && !(step.duration > 0)) throw new Error(`${where}: у шага screen нет duration > 0`);
+    if (step.approach && step.type !== 'talk') throw new Error(`${where}: approach бывает только у шага talk`);
+    if (step.approach && spots[NPCS.find((n) => n.id === step.npc).spot].sit) throw new Error(`${where}: сидящий NPC не может подойти к игроку (approach)`);
+    if (step.brokenScreen && !spots[step.brokenScreen]) throw new Error(`${where}: нет рабочего места «${step.brokenScreen}» в office.spots`);
     if ((step.type === 'pickup' || step.type === 'hazard') && !step.item) throw new Error(`${where}: не указан item`);
     if (step.type === 'hazard' && !step.targets?.every((id) => spots[id]?.rack)) throw new Error(`${where}: targets должны быть точками office.spots с полем rack`);
     if (step.type === 'minigame') getMinigame(step.minigame);
@@ -65,7 +79,8 @@ export function createGame({ onNewGame }) {
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 160);
 
   // Потолок смотрит вниз и получает groundColor: светлый тон, чтобы он не выглядел «грязным»
-  scene.add(new THREE.HemisphereLight('#ffffff', '#c9b391', 1.0));
+  const hemi = new THREE.HemisphereLight(LIGHTING.day.sky, LIGHTING.day.ground, LIGHTING.day.hemi);
+  scene.add(hemi);
   // Солнце светит «сквозь» потолок (он не отбрасывает тень) и даёт объёмные тени от мебели
   const sun = new THREE.DirectionalLight('#fff4e0', 1.2);
   sun.position.set(-8, 18, 6);
@@ -93,18 +108,31 @@ export function createGame({ onNewGame }) {
   const hud = createHud();
   const player = createPlayer(scene, camera, office);
 
-  // Коллайдер NPC есть, только пока NPC в офисе (см. npcArrived в refresh)
+  // Коллайдер NPC есть, только пока NPC в офисе (см. npcArrived в refresh) и не идёт (см. подход NPC ниже)
+  const placeCollider = (npc) => {
+    const { x, z } = npc.position;
+    Object.assign(npc.collider, { x0: x - NPC_HALF, z0: z - NPC_HALF, x1: x + NPC_HALF, z1: z + NPC_HALF });
+  };
   const npcs = NPCS.map((def) => {
     const npc = createNpc(def, office.spots[def.spot]);
     scene.add(npc.group);
-    const { x, z } = npc.position;
-    npc.collider = { x0: x - 0.3, z0: z - 0.3, x1: x + 0.3, z1: z + 0.3 };
+    npc.collider = {};
+    placeCollider(npc);
     return npc;
   });
+  const npcById = (id) => npcs.find((n) => n.def.id === id);
+  const removeCollider = (npc) => {
+    const k = office.colliders.indexOf(npc.collider);
+    if (k !== -1) office.colliders.splice(k, 1);
+  };
+  const addCollider = (npc) => {
+    if (!office.colliders.includes(npc.collider)) office.colliders.push(npc.collider);
+  };
 
-  // Маркер квеста без шагов — на его spot; у многошагового — по маркеру на каждый шаг со spot
+  // Маркер квеста без шагов — на его spot; у многошагового — по маркеру на каждый шаг со spot.
+  // У talk с approach spot — точка, куда подходит NPC, маркер не нужен
   const markers = QUESTS.flatMap((q) => {
-    const targets = q.steps ? questSteps(q).filter((step) => step.spot) : [null];
+    const targets = q.steps ? questSteps(q).filter((step) => step.spot && !step.approach) : [null];
     return targets.map((step) => {
       const spot = office.spots[step ? step.spot : q.spot];
       const marker = createQuestMarker(spot.x, spot.z);
@@ -124,6 +152,8 @@ export function createGame({ onNewGame }) {
       return { quest: q, step, stepIndex, targetId, spot, fire };
     });
   }));
+  // Рабочие места, мониторы которых «падают» на шагах с brokenScreen
+  const screenKeys = [...new Set(QUESTS.flatMap((q) => questSteps(q).map((step) => step.brokenScreen).filter(Boolean)))];
   const heldExtinguisher = buildExtinguisher();
   // Пуфики и кофемашина Игровой; руки свободны, пока нет предмета квеста (см. heldItem ниже)
   const props = createProps({
@@ -177,25 +207,48 @@ export function createGame({ onNewGame }) {
   const day = () => DAYS[store.currentDay()];
   const dayQuests = () => questsOfDay(store.currentDay(), QUESTS);
   const isDayDone = () => dayQuests().every((q) => store.questStatus(q.id) === QuestStatus.DONE);
-  // NPC приходит в офис в день своего квеста; NPC без квеста в офисе всегда
-  const npcArrived = (npc) => {
-    const quest = QUESTS.find((q) => q.npc === npc.def.id);
-    return !quest || dayOfQuest(quest.id) <= store.currentDay();
+  // Квест NPC на сегодня: у NPC может быть несколько квестов в разные дни. Берём квест текущего дня,
+  // иначе — самый поздний из прошедших дней; null, если все его квесты ещё впереди
+  const questOfNpc = (npcId) => {
+    const today = store.currentDay();
+    const own = QUESTS.filter((q) => q.npc === npcId && dayOfQuest(q.id) <= today);
+    const latest = (a, b) => (dayOfQuest(b.id) > dayOfQuest(a.id) ? b : a);
+    return own.length ? own.reduce(latest) : null;
   };
+  // NPC приходит в офис в день своего первого квеста; NPC без квестов в офисе всегда
+  const npcArrived = (npc) => !QUESTS.some((q) => q.npc === npc.def.id) || questOfNpc(npc.def.id) !== null;
+
+  // ---------- Вечер ----------
+  let eveningOn = null;
+  function applyTimeOfDay(on) {
+    if (eveningOn === on) return;
+    eveningOn = on;
+    const light = on ? LIGHTING.evening : LIGHTING.day;
+    sky.setEvening(on);
+    office.setEvening(on);
+    sun.color.set(light.sun);
+    sun.intensity = light.sunIntensity;
+    sun.position.set(...light.sunPos);
+    hemi.color.set(light.sky);
+    hemi.groundColor.set(light.ground);
+    hemi.intensity = light.hemi;
+    scene.background.set(light.background);
+  }
 
   // ---------- Синхронизация мира с состоянием ----------
   function refresh() {
     office.setLocks(lockedRooms(store.currentDay()));
+    applyTimeOfDay(isEvening(store.currentDay()));
     for (const npc of npcs) {
-      const quest = QUESTS.find((q) => q.npc === npc.def.id);
-      // «!» над NPC, к которому ведёт текущий talk-шаг, иначе — статус его собственного квеста
+      const quest = questOfNpc(npc.def.id);
+      // «!» над NPC, к которому ведёт текущий talk-шаг, иначе — статус его квеста на сегодня
       const status = talkStepFor(npc.def.id) ? QuestStatus.AVAILABLE : quest ? store.questStatus(quest.id) : null;
       npc.setStatus(status);
       const arrived = npcArrived(npc);
       npc.group.visible = arrived;
-      const k = office.colliders.indexOf(npc.collider);
-      if (arrived && k === -1) office.colliders.push(npc.collider);
-      if (!arrived && k !== -1) office.colliders.splice(k, 1);
+      if (npc.walking) continue; // коллайдер вернёт окончание пути
+      if (arrived) addCollider(npc);
+      else removeCollider(npc);
     }
     for (const m of markers) m.marker.group.visible = markerLive(m);
     fireBurning = false;
@@ -215,6 +268,9 @@ export function createGame({ onNewGame }) {
     const serverDown = QUESTS.some((q) => currentStep(q)?.serverDown);
     const serverFixed = store.questStatus('pipeline') === QuestStatus.DONE && !serverDown;
     office.setServerFixed(serverFixed);
+    // Синий экран на мониторе, пока текущий шаг квеста помечен brokenScreen
+    const broken = new Set(QUESTS.map((q) => currentStep(q)?.brokenScreen).filter(Boolean));
+    for (const key of screenKeys) office.setScreenCrashed(key, broken.has(key));
     serverLight.color.set(serverFixed ? '#6bc5ff' : '#ff6b6b');
     serverLight.intensity = 6;
     hud.renderJournal(dayQuests(), NPCS, store.questStatus, {
@@ -255,7 +311,7 @@ export function createGame({ onNewGame }) {
   function talk(npc) {
     const target = talkStepFor(npc.def.id);
     if (target) { talkStep(target.quest, target.step); return; }
-    const quest = QUESTS.find((q) => q.npc === npc.def.id);
+    const quest = questOfNpc(npc.def.id);
     const status = store.questStatus(quest.id);
     const lines = status === QuestStatus.AVAILABLE ? quest.dialog.intro : status === QuestStatus.ACTIVE ? quest.dialog.active : quest.dialog.done;
     let actions = [{ label: 'Понятно', primary: true }];
@@ -272,7 +328,15 @@ export function createGame({ onNewGame }) {
 
   function talkStep(quest, step) {
     openDialog(npcDef(step.npc), step.lines.map(t), [
-      { label: step.action ?? 'Понятно', primary: true, onClick: () => { closeModal(); advanceStep(quest); } },
+      {
+        label: step.action ?? 'Понятно',
+        primary: true,
+        onClick: () => {
+          closeModal();
+          if (step.approach) sendHome(npcById(step.npc)); // подошедший NPC возвращается на место
+          advanceStep(quest);
+        },
+      },
     ]);
   }
 
@@ -280,7 +344,7 @@ export function createGame({ onNewGame }) {
     if (quest.steps) store.setQuestStep(quest.id, 0);
     store.setQuestStatus(quest.id, QuestStatus.ACTIVE);
     closeModal();
-    if (quest.steps) announceStep(stepAt(quest, 0));
+    if (quest.steps) enterStep(quest, stepAt(quest, 0));
     else hud.toast(`Новая задача: «${quest.title}». Иди к жёлтому маркеру — ${quest.where}.`, 'quest');
   }
 
@@ -289,13 +353,83 @@ export function createGame({ onNewGame }) {
     if (step.toast) hud.toast(step.toast, step.alarm ? 'alarm' : 'quest');
   }
 
+  // Шаг стал текущим: уведомление; шаги screen и talk с approach начинаются сами
+  function enterStep(quest, step) {
+    announceStep(step);
+    if (step.type === 'screen') runScreen(quest, step);
+    else if (step.approach) approach(quest, step);
+  }
+
   // Следующий шаг; после последнего квест выполнен
   function advanceStep(quest) {
     const next = store.questStep(quest.id).index + 1;
     const step = stepAt(quest, next);
     if (!step) { completeQuest(quest); return; }
     store.setQuestStep(quest.id, next);
-    announceStep(step);
+    enterStep(quest, step);
+  }
+
+  // Полноэкранная сцена шага screen (ui/screens.js); закончилась — следующий шаг
+  let screenRunning = false;
+  function runScreen(quest, step) {
+    if (screenRunning) return;
+    screenRunning = true;
+    SCREENS[step.screen]({
+      duration: step.duration,
+      onDone: () => {
+        screenRunning = false;
+        advanceStep(quest);
+      },
+    });
+  }
+
+  // ---------- Подход NPC (talk с approach) ----------
+  // Пока NPC идёт к игроку, игрок «заморожен», а взаимодействие отключено
+  let cutscene = null; // { npc } — кто сейчас идёт к игроку
+
+  function approach(quest, step) {
+    const npc = npcById(step.npc);
+    const spot = office.spots[step.spot];
+    const p = player.position;
+    cutscene = { npc };
+    player.setFrozen(true);
+    removeCollider(npc);
+    npc.walkTo([...(spot.path ?? []), spot], {
+      face: Math.atan2(p.x - spot.x, p.z - spot.z),
+      onArrive: () => {
+        placeCollider(npc);
+        addCollider(npc);
+        player.face(npc.position.x, npc.position.z);
+        player.setFrozen(false);
+        cutscene = null;
+        hud.setPrompt(null);
+        if (!isModalOpen()) talkStep(quest, step); // иначе диалог откроется по E — над NPC горит «!»
+      },
+    });
+  }
+
+  function sendHome(npc) {
+    removeCollider(npc);
+    npc.returnHome({
+      onArrive: () => {
+        placeCollider(npc);
+        if (npcArrived(npc)) addCollider(npc);
+      },
+    });
+  }
+
+  // Расставить NPC по состоянию (старт и перезапуск игры): подошедший по approach-шагу стоит у игрока,
+  // остальные — на своих местах
+  function placeNpcs() {
+    for (const npc of npcs) {
+      const target = talkStepFor(npc.def.id);
+      const spot = target?.step.approach ? office.spots[target.step.spot] : office.spots[npc.def.spot];
+      if (!npc.walking && npc.position.x === spot.x && npc.position.z === spot.z) continue;
+      removeCollider(npc);
+      npc.place(spot.x, spot.z, spot.face, { via: target?.step.approach ? spot.path : [] });
+      placeCollider(npc);
+      if (npcArrived(npc)) addCollider(npc);
+    }
   }
 
   function completeQuest(quest) {
@@ -461,7 +595,7 @@ export function createGame({ onNewGame }) {
   const canExtinguish = (f) => currentStep(f.quest) === f.step;
 
   function interact() {
-    if (isModalOpen() || props.busy) return;
+    if (isModalOpen() || props.busy || cutscene) return;
     if (player.seated) { props.interact(); return; }
     if (nearMarker) activateMarker(nearMarker);
     else if (nearFire) { if (canExtinguish(nearFire)) extinguish(nearFire); }
@@ -504,6 +638,11 @@ export function createGame({ onNewGame }) {
 
     if (isModalOpen()) return;
     const key = input.state.isTouch ? '' : 'E — ';
+    if (cutscene) {
+      hud.setPrompt(`${cutscene.npc.def.name} идёт к тебе…`);
+      input.setActionVisible(false);
+      return;
+    }
     // Пока игрок пьёт кофе или сидит, говорят только предметы
     if (props.busy || player.seated) {
       const prop = props.check();
@@ -671,6 +810,16 @@ export function createGame({ onNewGame }) {
       sit: (k) => player.sit(office.seats[k]),
       stand: () => player.stand(),
       coffee: () => props.brewCoffee(),
+      bsod: () => SCREENS.bsod({ duration: 5 }),
+      // Запустить подход NPC для текущего approach-шага
+      approach: () => {
+        for (const q of QUESTS) {
+          const step = currentStep(q);
+          if (step?.approach) approach(q, step);
+        }
+      },
+      evening: (on) => applyTimeOfDay(on),
+      office,
     };
   }
 
@@ -682,11 +831,18 @@ export function createGame({ onNewGame }) {
       else player.place(spawn.x, spawn.z, spawn.face);
       lastMarkerAuto = null;
       lastExitAuto = false;
+      cutscene = null;
       refresh();
+      placeNpcs();
       hud.show();
       running = true;
       input.setEnabled(true);
       if (!s.dayIntroShown) showDayIntro();
+      // Перезагрузка посреди полноэкранной сцены — показываем её снова
+      for (const q of QUESTS) {
+        const step = currentStep(q);
+        if (step?.type === 'screen') runScreen(q, step);
+      }
       // Если игрок сохранился, стоя на маркере, не открываем мини-игру или итоги сразу
       checkInteractionsSilently();
     },
