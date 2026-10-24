@@ -1,5 +1,6 @@
 // Точка входа: стартовый экран (никнейм / продолжить) и запуск игры.
 import '@fontsource/press-start-2p/400.css';
+import '@fontsource/jetbrains-mono/400.css'; // моноширинный шрифт для редакторов кода
 import { createGame } from './game.js';
 import { h } from './ui/dom.js';
 import * as store from './state.js';
