@@ -1,0 +1,14 @@
+---
+- name: Auth Docker in GitHub
+  shell: |
+    echo "{{ github_token }}" | docker login ghcr.io -u {{ github_username }} --password-stdin
+  args:
+    executable: /bin/bash
+  become: true
+  changed_when: false
+
+- name: Add GitHub in known_hosts
+  shell: |
+    ssh-keyscan -t rsa github.com >> /root/.ssh/known_hosts
+  args:
+    creates: /root/.ssh/known_hosts

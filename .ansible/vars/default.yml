@@ -1,0 +1,7 @@
+---
+github_username: "YOUR_GITHUB_USERNAME"
+github_token: "ghp_YOUR_SECRET_PERSONAL_ACCESS_TOKEN_HERE"
+
+github_repo_path: "username/example-repo"
+
+project_dest_dir: "/var/www/my-project"

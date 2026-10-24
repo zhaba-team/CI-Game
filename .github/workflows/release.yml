@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute Remote SSH Commands
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DOMAIN }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          timeout: 5m
+          envs: PROD_ENV
+          script: |
+            cd ${{ secrets.PROJECT_DEST_DIR }}
+            
+            git reset --hard
+            
+            git fetch --tags --prune --prune-tags --all
+            
+            git checkout tags/${{ github.event.release.tag_name }}
+            
+            echo "$PROD_ENV" > .env
+            
+            chmod 600 .env
+            
+            make release
+        env:
+          PROD_ENV: ${{ vars.PROD_ENV }}

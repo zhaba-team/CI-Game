@@ -1,0 +1,35 @@
+---
+- name: Copy conf sysctl for net
+  ansible.builtin.copy:
+    src: files/99-highload.conf
+    dest: /etc/sysctl.d/99-highload.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Change limits ulimit
+  community.general.pam_limits:
+    domain: "{{ item.domain }}"
+    limit_type: "{{ item.type }}"
+    limit_item: nofile
+    value: 65535
+  loop:
+    - { domain: '*', type: 'soft' }
+    - { domain: '*', type: 'hard' }
+    - { domain: 'root', type: 'soft' }
+    - { domain: 'root', type: 'hard' }
+
+- name: Is exists /etc/docker
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    mode: '0755'
+
+- name: Copy daemon.json
+  ansible.builtin.copy:
+    src: files/daemon.json
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Docker

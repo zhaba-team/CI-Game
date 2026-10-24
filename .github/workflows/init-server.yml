@@ -1,0 +1,40 @@
+name: Init Server
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run playbook
+        uses: dawidd6/action-ansible-playbook@v9
+        with:
+          playbook: playbooks/init-server.yml
+          directory: .ansible/
+          configuration: |
+            [defaults]
+            callbacks_enabled = ansible.posix.profile_tasks, ansible.posix.timer
+            stdout_callback = ansible.builtin.default
+            result_format = yaml
+            nocows = false
+            
+            [persistent_connection]
+            command_timeout = 1000000000
+
+            [ssh_connection]
+            ssh_args = -C -o ControlMaster=auto -o ControlPersist=100000s -o ServerAliveInterval=30 -o ServerAliveCountMax=99999
+          key: ${{secrets.SSH_PRIVATE_KEY}}
+          inventory: |
+            [webservers]
+            ${{secrets.DOMAIN}}
+            
+            [all:vars]
+            ansible_connection=ssh
+            ansible_user=${{secrets.SSH_USER}}
+            ansible_port=${{secrets.SSH_PORT}}
+          options: |
+            --verbose

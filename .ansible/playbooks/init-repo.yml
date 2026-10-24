@@ -1,0 +1,10 @@
+- name: Auth GitHub and Copy Repo
+  hosts: webservers
+  vars_files:
+    - ../vars/default.yml
+  tasks:
+    - name: Auth Github
+      ansible.builtin.include_tasks: ../tasks/github/auth.yml
+
+    - name: Copy Infra Repo
+      ansible.builtin.include_tasks: ../tasks/github/clone.yml
