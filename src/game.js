@@ -29,21 +29,23 @@ export function createGame({ onNewGame }) {
   scene.background = new THREE.Color('#bfe4ff');
   const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
 
-  scene.add(new THREE.HemisphereLight('#ffffff', '#b59a74', 1.4));
-  const sun = new THREE.DirectionalLight('#fff4e0', 1.6);
+  // Потолок смотрит вниз и получает groundColor: светлый тон, чтобы он не выглядел «грязным»
+  scene.add(new THREE.HemisphereLight('#ffffff', '#c9b391', 1.0));
+  // Солнце светит «сквозь» потолок (он не отбрасывает тень) и даёт объёмные тени от мебели
+  const sun = new THREE.DirectionalLight('#fff4e0', 1.2);
   sun.position.set(-8, 18, 6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 16, bottom: -16, near: 1, far: 50 });
   sun.shadow.bias = -0.0008;
   scene.add(sun);
-  // Голубоватая подсветка серверной
-  const serverLight = new THREE.PointLight('#ff6b6b', 6, 12);
-  serverLight.position.set(11, 2.6, 6);
-  scene.add(serverLight);
 
   const office = buildOffice();
   scene.add(office.root);
+  // Подсветка серверной под потолком: красная, пока сервер «лежит», голубая — после починки
+  const serverLight = new THREE.PointLight('#ff6b6b', 6, 12);
+  serverLight.position.set(11, office.ceilingHeight - 0.6, 6);
+  scene.add(serverLight);
 
   const input = createInput(canvas);
   const hud = createHud();
@@ -335,6 +337,9 @@ export function createGame({ onNewGame }) {
   if (import.meta.env.DEV) {
     window.__game = {
       player,
+      camera,
+      renderer,
+      ceilingHeight: office.ceilingHeight,
       teleport: (x, z, face = 0) => player.place(x, z, face),
       spots: office.spots,
       colliders: office.colliders,

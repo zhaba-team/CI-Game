@@ -5,8 +5,14 @@ import * as THREE from 'three';
 import { mat, glow, box, cyl, ico, group } from './lowpoly.js';
 import { createWallSign } from './signs.js';
 
-const WALL_H = 3;
+const WALL_H = 4.2;
 const WALL_T = 0.3;
+const DOOR_H = 2.7; // высота дверного проёма, выше — фрамуга
+const WIN_BOTTOM = 0.9;
+const WIN_H = 2.4;
+const LAMP = 0.6;        // светящийся рассеиватель панели 60×60
+const LAMP_FRAME = 0.68;
+const LAMP_DROP = 0.04;  // насколько панель выступает из потолка
 
 // Границы помещений (x: -16..16, z: -12..12)
 export const ROOMS = {
@@ -75,9 +81,12 @@ export function buildOffice() {
   // Стена между кабинетом директора и серверной
   wallSegment(5, 0, 16, 0);
 
-  // Дверные проёмы: перемычка над проёмом и табличка на простенке рядом
+  // Дверные проёмы: фрамуга до потолка, наличник по её нижнему краю и табличка на простенке рядом
   const doorSign = (text, doorZ, signZ, color) => {
-    root.add(box(0.32, 0.12, 3.5, '#c9d1c9', 5, WALL_H - 0.12, doorZ));
+    const transom = box(WALL_T, WALL_H - DOOR_H, 3.5, null, 5, DOOR_H, doorZ, wallMat);
+    root.add(transom);
+    occluders.push(transom); // коллайдер не нужен: игрок проходит под фрамугой
+    root.add(box(0.32, 0.12, 3.5, '#c9d1c9', 5, DOOR_H - 0.12, doorZ));
     const sign = createWallSign(text, { width: 1.9, height: 0.34, letterColor: color, frameColor: color });
     sign.position.set(5 - WALL_T / 2, 1.85, signZ);
     sign.rotation.y = -Math.PI / 2; // лицом в open-space (−x)
@@ -90,24 +99,74 @@ export function buildOffice() {
   // Окна на внешних стенах
   const windowMat = glow('#bfe4ff', 0.55);
   for (let x = -13; x <= 3; x += 4) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.4), windowMat);
-    w.position.set(x, 1.7, -11.84);
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(2.4, WIN_H), windowMat);
+    w.position.set(x, WIN_BOTTOM + WIN_H / 2, -11.84);
     root.add(w);
-    root.add(box(2.6, 0.08, 0.1, '#9aa7a0', x, 0.96, -11.8));
+    root.add(box(2.6, 0.08, 0.1, '#9aa7a0', x, WIN_BOTTOM - 0.04, -11.8));
   }
   for (let z = -9; z <= 9; z += 4) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.4), windowMat);
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(2.4, WIN_H), windowMat);
     w.rotation.y = Math.PI / 2;
-    w.position.set(-15.84, 1.7, z);
+    w.position.set(-15.84, WIN_BOTTOM + WIN_H / 2, z);
     root.add(w);
   }
 
-  // Вывеска компании: на внутренней грани задней стены, лицом в open-space
+  // Вывеска компании: на внутренней грани задней стены, лицом в open-space,
+  // центр на ~70 % высоты стены
   const logo = createWallSign('жыбий рыр', { width: 3, height: 0.8, letterColor: '#2e9e5b', frameColor: '#1f7442' });
-  logo.position.set(-8, 2.2, 12 - WALL_T / 2);
+  logo.position.set(-8, 2.9, 12 - WALL_T / 2);
   logo.rotation.y = Math.PI;
   root.add(logo);
   solidFrom(logo);
+
+  // ---------- Потолок и светильники ----------
+  // Лицом вниз: сверху плоскость отсекается backface culling, а камера не поднимается выше WALL_H − 0.4.
+  // Тени не отбрасывает, иначе солнце не попадёт в офис.
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(32 + WALL_T, 24 + WALL_T), mat('#f3f4f0'));
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.set(0, WALL_H, 0);
+  root.add(ceiling);
+
+  // Центры панелей: ровная сетка nx × nz внутри помещения
+  const lampCenters = [];
+  const lampGrid = (room, nx, nz) => {
+    for (let ix = 0; ix < nx; ix++) {
+      for (let iz = 0; iz < nz; iz++) {
+        lampCenters.push([
+          room.x0 + (ix + 0.5) * (room.x1 - room.x0) / nx,
+          room.z0 + (iz + 0.5) * (room.z1 - room.z0) / nz,
+        ]);
+      }
+    }
+  };
+  lampGrid(ROOMS.openSpace, 7, 8);
+  lampGrid(ROOMS.director, 3, 3);
+  lampGrid(ROOMS.server, 3, 3);
+
+  // Все панели — два InstancedMesh (рамки и рассеиватели): +2 draw call вместо сотни
+  const lampMesh = (geometry, material, y) => {
+    const mesh = new THREE.InstancedMesh(geometry, material, lampCenters.length);
+    const dummy = new THREE.Object3D();
+    lampCenters.forEach(([x, z], k) => {
+      dummy.position.set(x, y, z);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(k, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.frustumCulled = false; // bounding sphere в r169 не учитывает инстансы
+    root.add(mesh);
+  };
+  lampMesh(new THREE.BoxGeometry(LAMP_FRAME, LAMP_DROP, LAMP_FRAME), mat('#d9dde0', { metalness: 0.3, roughness: 0.5 }), WALL_H - LAMP_DROP / 2);
+  // Рассеиватель на 5 мм ниже рамки, чтобы не было z-fighting
+  lampMesh(new THREE.BoxGeometry(LAMP, 0.01, LAMP), glow('#f4f8ff', 1.1), WALL_H - LAMP_DROP - 0.005);
+
+  // Один мягкий источник на помещение вместо света на каждую лампу:
+  // 74 PointLight убили бы FPS на мобильных. Серверную освещает serverLight из game.js.
+  const openSpaceLight = new THREE.PointLight('#fff6e8', 19, 26, 1);
+  openSpaceLight.position.set(-5.5, WALL_H - 0.5, 0);
+  const directorLight = new THREE.PointLight('#ffe9c7', 14, 14, 1);
+  directorLight.position.set(10.5, WALL_H - 0.5, -6);
+  root.add(openSpaceLight, directorLight);
 
   // ---------- Мебель ----------
   const monitor = (x, z, rot, screenColor = '#2b5d8a') => {
@@ -318,5 +377,5 @@ export function buildOffice() {
 
   spots.spawn = { x: -6, z: 7, face: Math.PI };
 
-  return { root, colliders, occluders, spots, animated, setServerFixed };
+  return { root, colliders, occluders, spots, animated, setServerFixed, ceilingHeight: WALL_H };
 }
