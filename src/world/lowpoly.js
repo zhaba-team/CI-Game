@@ -83,7 +83,7 @@ function canvasTexture(canvas) {
   return tex;
 }
 
-// Текстура-надпись для спрайтов (имена над NPC, вывески).
+// Текстура-надпись для спрайтов (имена и значки над NPC).
 export function textSprite(text, { color = '#fff', bg = 'rgba(18,53,36,0.85)', size = 48, height = 0.35 } = {}) {
   const { canvas, w, h } = textCanvas(text, { color, bg, size });
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTexture(canvas), depthWrite: false }));

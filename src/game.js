@@ -172,7 +172,7 @@ export function createGame({ onNewGame }) {
     store.setFinaleShown();
     openModal({
       title: `Поздравляем, ${name()}! 🏆`,
-      subtitle: 'Первая неделя стажировки в DonCode пройдена',
+      subtitle: 'Первая неделя стажировки в «жыбий рыр» пройдена',
       body: h('div', { class: 'lesson' },
         h('p', {}, 'Ты помог всей команде и попробовал себя в разных ролях IT-компании:'),
         h('ul', { class: 'roles' }, QUESTS.map((q) => {
@@ -286,7 +286,7 @@ export function createGame({ onNewGame }) {
   function showWelcome() {
     openModal({
       title: `Добро пожаловать, ${name()}!`,
-      subtitle: 'IT-компания DonCode, первый день стажировки',
+      subtitle: 'IT-компания «жыбий рыр», первый день стажировки',
       body: h('div', { class: 'lesson' },
         h('p', {}, 'Ты — новый стажёр-программист. Познакомься с командой: у коллег с жёлтым знаком «!» над головой есть для тебя задания. Выполнять их можно в любом порядке.'),
         h('div', { class: 'controls' },

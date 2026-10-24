@@ -2,7 +2,8 @@
 // Возвращает сцену-группу, список коллайдеров (AABB в плоскости XZ),
 // объекты, загораживающие камеру, и именованные точки (spots) для NPC и маркеров.
 import * as THREE from 'three';
-import { mat, glow, box, cyl, ico, group, textSprite } from './lowpoly.js';
+import { mat, glow, box, cyl, ico, group } from './lowpoly.js';
+import { createWallSign } from './signs.js';
 
 const WALL_H = 3;
 const WALL_T = 0.3;
@@ -74,15 +75,17 @@ export function buildOffice() {
   // Стена между кабинетом директора и серверной
   wallSegment(5, 0, 16, 0);
 
-  // Дверные проёмы: подсветка и таблички
-  const doorSign = (text, z, color) => {
-    const sign = textSprite(text, { bg: color, height: 0.4 });
-    sign.position.set(4.7, 2.55, z);
+  // Дверные проёмы: перемычка над проёмом и табличка на простенке рядом
+  const doorSign = (text, doorZ, signZ, color) => {
+    root.add(box(0.32, 0.12, 3.5, '#c9d1c9', 5, WALL_H - 0.12, doorZ));
+    const sign = createWallSign(text, { width: 1.9, height: 0.34, letterColor: color, frameColor: color });
+    sign.position.set(5 - WALL_T / 2, 1.85, signZ);
+    sign.rotation.y = -Math.PI / 2; // лицом в open-space (−x)
     root.add(sign);
-    root.add(box(0.32, 0.12, 3.5, '#c9d1c9', 5, WALL_H - 0.12, z));
+    solidFrom(sign);
   };
-  doorSign('Кабинет директора', -5.25, 'rgba(140,59,59,0.92)');
-  doorSign('Серверная', 5.25, 'rgba(40,60,90,0.92)');
+  doorSign('Кабинет директора', -5.25, -2.35, '#8c3b3b');
+  doorSign('Серверная', 5.25, 2.35, '#28405a');
 
   // Окна на внешних стенах
   const windowMat = glow('#bfe4ff', 0.55);
@@ -99,10 +102,12 @@ export function buildOffice() {
     root.add(w);
   }
 
-  // Логотип компании
-  const logo = textSprite('<DonCode/>', { bg: 'rgba(46,158,91,0.95)', height: 0.8, size: 64 });
-  logo.position.set(-8, 2.2, 11.8);
+  // Вывеска компании: на внутренней грани задней стены, лицом в open-space
+  const logo = createWallSign('жыбий рыр', { width: 3, height: 0.8, letterColor: '#2e9e5b', frameColor: '#1f7442' });
+  logo.position.set(-8, 2.2, 12 - WALL_T / 2);
+  logo.rotation.y = Math.PI;
   root.add(logo);
+  solidFrom(logo);
 
   // ---------- Мебель ----------
   const monitor = (x, z, rot, screenColor = '#2b5d8a') => {

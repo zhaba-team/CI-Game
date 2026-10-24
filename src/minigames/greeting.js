@@ -84,7 +84,7 @@ export default {
         ),
         h('div', { class: 'side' },
           h('div', { class: 'browser' },
-            h('div', { class: 'browser-bar' }, h('i'), h('i'), h('i'), h('span', {}, 'doncode.ru')),
+            h('div', { class: 'browser-bar' }, h('i'), h('i'), h('i'), h('span', {}, 'жыбийрыр.рф')),
             h('div', { class: 'browser-page hero' }, result, h('div', { class: 'hero-sub' }, 'Главная страница')),
           ),
           feedback, runBtn,
