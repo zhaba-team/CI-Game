@@ -1,4 +1,4 @@
-// HUD: журнал заданий, подсказка взаимодействия, всплывающие уведомления, вспышка тревоги.
+// HUD: журнал заданий, подсказка взаимодействия, подсказка захвата курсора, всплывающие уведомления, вспышка тревоги.
 import { h } from './dom.js';
 import { QuestStatus } from '../state.js';
 
@@ -13,6 +13,7 @@ export function createHud() {
   const journal = document.getElementById('journal');
   const prompt = document.getElementById('prompt');
   const toasts = document.getElementById('toasts');
+  const lockHint = document.getElementById('lock-hint');
   let collapsed = window.innerWidth < 640;
   const flash = h('div', { class: 'alarm-flash hidden' });
   hud.append(flash);
@@ -46,6 +47,9 @@ export function createHud() {
       prompt.textContent = text;
       prompt.classList.remove('hidden');
     },
+
+    // Подсказка «кликни, чтобы управлять камерой мышью» (десктоп, курсор не захвачен)
+    setLockHint(visible) { lockHint.classList.toggle('hidden', !visible); },
 
     // Короткая красная вспышка по краям экрана (начало пожара)
     alarm() {

@@ -21,6 +21,7 @@ code, pre, kbd, .code, .token, .chip, .swatch span, .step-card code, .editor-tab
 html, body {
   margin: 0;
   height: 100%;
+  height: 100dvh;
   overflow: hidden;
   background: var(--green-dark);
   font-family: var(--font);
@@ -33,6 +34,8 @@ html, body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
 }
+/* Размер канваса задаёт CSS (у заменяемого элемента одного inset мало — нужны width/height);
+   game.js читает clientWidth/clientHeight и подгоняет под них буфер и камеру */
 #game {
   position: fixed;
   inset: 0;
@@ -80,14 +83,16 @@ kbd {
   position: fixed;
   inset: 0;
   z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 16px;
+  display: grid; /* карточка центрируется margin: auto — при нехватке высоты не уезжает вверх, а прокручивается */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   background: radial-gradient(circle at 30% 20%, rgba(46,158,91,0.55), rgba(18,53,36,0.92) 60%);
   backdrop-filter: blur(3px);
 }
 .start-card {
   width: min(440px, 100%);
+  margin: auto;
   color: #fff;
   text-align: center;
 }
@@ -124,6 +129,9 @@ kbd {
   outline: none;
 }
 .nick-form input:focus { border-color: var(--yellow); }
+/* iOS зумит страницу при фокусе поля со шрифтом меньше 16px */
+body.touch .nick-form input { font-size: 16px; }
+@media (pointer: coarse) { .nick-form input { font-size: 16px; } }
 .error { color: #ffb4a6; font-size: 10px; min-height: 18px; }
 
 /* ---------- HUD ---------- */
@@ -195,6 +203,20 @@ kbd {
   animation: pulse 1.6s infinite;
 }
 body.touch #prompt { bottom: calc(170px + env(safe-area-inset-bottom)); font-size: 10px; }
+#lock-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  background: rgba(18, 53, 36, 0.75);
+  color: #fff;
+  font-size: 10px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  text-align: center;
+  pointer-events: none !important; /* клик проходит на канвас и захватывает курсор */
+}
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(255, 201, 60, 0.25); } }
 
 #toasts {
@@ -384,9 +406,12 @@ pre.code.small { border-radius: 12px; padding: 12px 14px; font-size: 10px; white
 .tok-op { color: #c9d1d9; }
 .tok-comment { color: #8b98a5; }
 .editor-tab { display: inline-block; background: var(--code-bg); color: #c9d1d9; font-family: var(--mono); font-size: 10px; padding: 6px 14px; border-radius: 10px 10px 0 0; }
-.code-line { display: flex; gap: 14px; padding: 3px 14px 3px 0; white-space: pre; border-left: 3px solid transparent; }
+/* Длинные строки переносятся (soft wrap), а не листаются: продолжение строки сдвинуто на 2 символа,
+   ведущие пробелы-отступы сохраняются (pre-wrap) */
+.code-line { display: flex; gap: 14px; padding: 3px 14px 3px 0; white-space: pre-wrap; border-left: 3px solid transparent; }
+.code-line > span:last-child:not(.ln) { flex: 1; min-width: 0; overflow-wrap: anywhere; padding-left: 2ch; text-indent: -2ch; }
 .code-line.tall { padding: 8px 14px 8px 0; align-items: center; }
-.code-line.tall > span:last-child { min-width: 0; white-space: normal; } /* пропуски переносятся и остаются на экране */
+.code-line.tall > span:last-child { min-width: 0; white-space: normal; padding-left: 0; text-indent: 0; } /* пропуски переносятся и остаются на экране */
 .code-line .ln { color: #5d6b78; width: 2.2em; text-align: right; flex-shrink: 0; user-select: none; }
 .minigame .code-line[class~="code-line"]:not(.tall) { cursor: default; }
 .editor .code .code-line:hover { background: rgba(255,255,255,0.05); }
@@ -434,6 +459,18 @@ pre.code.small { border-radius: 12px; padding: 12px 14px; font-size: 10px; white
 .chip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 8px; background: #fff; border: 2px solid var(--line); border-radius: 10px; font-family: var(--mono); font-weight: 700; overflow-wrap: anywhere; }
 .chip.selected { border-color: var(--green); background: var(--green-light); }
 .radius-demo { width: 20px; height: 20px; background: var(--muted); }
+/* Чеклист шагов: пункт отмечается за сделанный выбор, правильность проверяет «Проверить» */
+.paint-steps { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 12px; padding: 0; font-size: 10px; color: var(--muted); }
+.paint-steps li { display: flex; align-items: center; gap: 6px; }
+.paint-steps b { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #f5f8f6; border: 2px solid var(--line); font-weight: 400; }
+.paint-steps li.done { color: var(--green); }
+.paint-steps li.done b { background: var(--green); border-color: var(--green); color: #fff; font-size: 0; }
+.paint-steps li.done b::after { content: '✓'; font-size: 10px; }
+.paint-site-hint { font-size: 10px; line-height: 1.7; color: var(--muted); margin-bottom: 6px; }
+/* «Купить» готова к проверке: пульсирующее жёлтое кольцо, как у подсказки #prompt */
+.site-buy.ready { box-shadow: 0 0 0 3px var(--yellow); animation: pulse 1.6s infinite; }
+.paint-check { width: 100%; margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .site-buy.ready { animation: none; } }
 
 /* Пайплайн */
 .pool, .track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
@@ -531,8 +568,33 @@ pre.terminal { margin: 12px 0 0; background: #0b1f12; color: #7dffa8; font-famil
   .avatar { width: 46px; height: 46px; font-size: 14px; border-radius: 14px; }
   .shop-img { width: 80px; height: 80px; font-size: 40px; }
   #journal { width: 240px; }
+  /* «Покрась кнопку»: результат и «Проверить» сразу под выбором (порядок — в paintButton.js) */
+  .paint-grid { gap: 10px; }
+  .paint-col { display: contents; }
+  .paint-grid .mockup { order: 1; }
+  .paint-grid .paint-pick { order: 2; }
+  .paint-grid .paint-site { order: 3; }
+  .paint-grid .feedback { order: 4; margin-top: 0; }
+  .paint-grid .paint-check { order: 5; margin-top: 0; }
+  .paint-grid .paint-code { order: 6; }
+  .paint-grid .label { margin-top: 0; }
 }
 @media (max-height: 500px) and (orientation: landscape) {
+  /* Стартовый экран на телефоне в ландшафте: слева лого и описание, справа форма — влезает в ~390px */
+  .start-card {
+    width: min(760px, 100%);
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto 1fr;
+    column-gap: 24px;
+    align-items: center;
+  }
+  .start-card .logo { justify-self: center; }
+  .start-card h1 { font-size: 22px; margin: 12px 0 8px; }
+  .start-card .subtitle { font-size: 10px; line-height: 1.7; margin: 0; align-self: start; }
+  #start-content { grid-column: 2; grid-row: 1 / -1; }
+  .nick-form, .resume { padding: 14px; gap: 8px; }
+  .start-card .btn.big { padding: 13px 18px; font-size: 12px; }
   .modal { max-height: calc(100dvh - 16px); }
   .modal-backdrop { padding: 8px; }
   #joystick { width: 110px; height: 110px; }
@@ -611,6 +673,10 @@ pre.terminal { margin: 12px 0 0; background: #0b1f12; color: #7dffa8; font-famil
 .pp-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .pp-hint { font-size: 8px; color: var(--muted); text-align: center; line-height: 1.6; }
 @media (max-width: 480px) {
+  /* Узкий экран: номер строки уже — на строку кода влезает больше символов */
+  .code-line { gap: 8px; padding-right: 10px; }
+  .code-line .ln { width: 1.6em; }
+  .infra-chips { padding-left: calc(1.6em + 11px); padding-right: 10px; }
   .pingpong { --pp-h: min(58dvh, calc((100vw - 56px) * 1.8)); gap: 8px; }
 }
 @media (max-height: 500px) and (orientation: landscape) {

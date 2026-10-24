@@ -1,4 +1,5 @@
-// Ввод: клавиатура, мышь (вращение камеры перетаскиванием), сенсорный стик и кнопка действия.
+// Ввод: клавиатура, мышь (на десктопе — захват курсора, иначе вращение камеры перетаскиванием),
+// сенсорный стик и кнопка действия.
 export function createInput(canvas) {
   const keys = new Set();
   const state = {
@@ -8,6 +9,7 @@ export function createInput(canvas) {
     lookDelta: { x: 0, y: 0 }, // накопленное смещение для камеры (в пикселях)
     lastLookTime: -Infinity,
     isTouch: false,
+    pointerLocked: false,    // курсор захвачен канвасом (десктоп)
   };
   const actionHandlers = new Set();
   const fireAction = () => { if (state.enabled) actionHandlers.forEach((fn) => fn()); };
@@ -21,14 +23,43 @@ export function createInput(canvas) {
   window.addEventListener('keyup', (e) => keys.delete(e.code));
   window.addEventListener('blur', () => keys.clear());
 
-  // ---------- Мышь / тач-перетаскивание для обзора ----------
+  // ---------- Захват курсора (десктоп): камера следует за мышью без нажатия ----------
+  // Режим мыши — только с точным указателем и без тача; Esc (браузер) освобождает курсор
+  let mouseMode = !window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(pointer: fine)').matches;
+  let running = false; // игра запущена — захват имеет смысл
+  const lockHandlers = new Set();
+  const isLocked = () => document.pointerLockElement === canvas;
+  const lockPointer = () => {
+    if (!mouseMode || !running || !state.enabled || isLocked() || !canvas.requestPointerLock) return;
+    try {
+      // Отказ браузера (нет жеста пользователя, кулдаун после Esc) не ошибка — останется подсказка
+      canvas.requestPointerLock()?.catch?.(() => {});
+    } catch { /* старые браузеры бросают синхронно */ }
+  };
+  const unlockPointer = () => { if (isLocked()) document.exitPointerLock(); };
+  document.addEventListener('pointerlockchange', () => {
+    state.pointerLocked = isLocked();
+    lookPointer = null;
+    lockHandlers.forEach((fn) => fn(state.pointerLocked));
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!isLocked() || !state.enabled) return;
+    state.lookDelta.x += e.movementX;
+    state.lookDelta.y += e.movementY;
+    state.lastLookTime = performance.now();
+  });
+
+  // ---------- Мышь / тач-перетаскивание для обзора (фолбэк, пока курсор не захвачен) ----------
   let lookPointer = null;
   let last = { x: 0, y: 0 };
   canvas.addEventListener('pointerdown', (e) => {
-    if (lookPointer !== null) return;
+    if (e.pointerType === 'mouse' && mouseMode && !isLocked()) lockPointer(); // клик — захват, без fireAction
+    if (lookPointer !== null || isLocked()) return;
     lookPointer = e.pointerId;
     last = { x: e.clientX, y: e.clientY };
-    canvas.setPointerCapture(e.pointerId);
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch { /* пока ждём ответа на захват курсора, браузер не даёт pointer capture — перетаскивание работает и без него */ }
   });
   canvas.addEventListener('pointermove', (e) => {
     if (e.pointerId !== lookPointer || !state.enabled) return;
@@ -52,6 +83,8 @@ export function createInput(canvas) {
   const enableTouchUI = () => {
     if (state.isTouch) return;
     state.isTouch = true;
+    mouseMode = false;
+    unlockPointer();
     touchRoot.classList.remove('hidden');
     document.body.classList.add('touch');
   };
@@ -91,6 +124,15 @@ export function createInput(canvas) {
   return {
     state,
     onAction(fn) { actionHandlers.add(fn); },
+    get mouseMode() { return mouseMode; },
+    // Игра запущена / остановлена: вне игры курсор не захватываем
+    setRunning(value) {
+      running = value;
+      if (!running) unlockPointer();
+    },
+    lockPointer,
+    unlockPointer,
+    onPointerLockChange(fn) { lockHandlers.add(fn); },
     setActionVisible(visible, label = '💬') {
       actionBtn.classList.toggle('hidden', !visible);
       actionBtn.textContent = label;

@@ -50,6 +50,7 @@ function nicknameForm() {
       return;
     }
     inputEl.blur();
+    window.visualViewport?.removeEventListener('resize', keepFormVisible);
     store.startNew(name);
     begin(true);
   };
@@ -59,7 +60,14 @@ function nicknameForm() {
     error,
     h('button', { class: 'btn primary big', type: 'submit' }, 'Начать стажировку'),
   );
-  setTimeout(() => inputEl.focus(), 50);
+  // Клавиатура телефона съедает пол-экрана: держим поле и кнопку над ней
+  const keepFormVisible = () => {
+    if (document.activeElement === inputEl) form.scrollIntoView({ block: 'center' });
+  };
+  inputEl.addEventListener('focus', () => setTimeout(keepFormVisible, 300)); // после выезда клавиатуры
+  window.visualViewport?.addEventListener('resize', keepFormVisible);
+  // На тач-устройствах без автофокуса: клавиатура не закрывает экран, пока игрок не тапнул по полю
+  if (window.matchMedia('(pointer: fine)').matches) setTimeout(() => inputEl.focus(), 50);
   return form;
 }
 

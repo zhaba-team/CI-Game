@@ -70,7 +70,6 @@ export function createGame({ onNewGame }) {
   const canvas = document.getElementById('game');
   const isMobile = window.matchMedia('(pointer: coarse)').matches;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile || window.devicePixelRatio < 2 });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -230,6 +229,7 @@ export function createGame({ onNewGame }) {
 
   // ---------- Рабочие дни ----------
   const day = () => DAYS[store.currentDay()];
+  const isLastDay = () => store.currentDay() === DAYS.length - 1;
   const dayQuests = () => questsOfDay(store.currentDay(), QUESTS);
   const isDayDone = () => dayQuests().every((q) => store.questStatus(q.id) === QuestStatus.DONE);
   // Квест NPC на сегодня: у NPC может быть несколько квестов в разные дни. Берём квест текущего дня,
@@ -261,6 +261,13 @@ export function createGame({ onNewGame }) {
   }
 
   // ---------- Синхронизация мира с состоянием ----------
+  // Последняя строка журнала, когда все задачи дня выполнены
+  function exitHint(dayDone) {
+    if (!dayDone) return null;
+    if (!isLastDay()) return 'День завершён — выход у ресепшена 🚪';
+    return store.getState().finished ? 'Стажировка пройдена 🏆 — гуляй по офису' : 'Все задачи выполнены — выход у ресепшена 🚪';
+  }
+
   function refresh() {
     office.setLocks(lockedRooms(store.currentDay()));
     applyTimeOfDay(isEvening(store.currentDay()));
@@ -300,13 +307,24 @@ export function createGame({ onNewGame }) {
     serverLight.intensity = 6;
     hud.renderJournal(dayQuests(), NPCS, store.questStatus, {
       title: day().title,
-      doneHint: dayDone ? 'День завершён — выход у ресепшена 🚪' : null,
+      doneHint: exitHint(dayDone),
       hintOf: activeHint,
     });
   }
   store.onChange(refresh);
 
-  onModalChange((open) => input.setEnabled(!open));
+  // Захват курсора (десктоп): на время модалки курсор свободен, после — захватываем снова.
+  // Закрытие кнопкой — жест пользователя, браузер разрешит захват; иначе останется подсказка «кликни»
+  let running = false;
+  const updateLockHint = () => hud.setLockHint(running && input.mouseMode && !isModalOpen() && !input.state.pointerLocked);
+  onModalChange((open) => {
+    input.setEnabled(!open);
+    if (open) input.unlockPointer();
+    // openModal поверх открытого окна сначала закрывает старое — ждём, не откроется ли новое
+    else setTimeout(() => { if (!isModalOpen()) input.lockPointer(); }, 0);
+    updateLockHint();
+  });
+  input.onPointerLockChange(updateLockHint);
 
   // ---------- Диалоги ----------
   function npcAvatar(def) {
@@ -512,6 +530,14 @@ export function createGame({ onNewGame }) {
 
   function showLesson(quest, npc) {
     const dayDone = isDayDone();
+    // В последний день финал открывается только на выходе из офиса
+    const finalDone = dayDone && isLastDay();
+    let action = { label: 'Супер!', primary: true };
+    if (finalDone) {
+      action = { label: 'Супер!', primary: true, onClick: () => { closeModal(); hud.toast('Все задачи пятницы готовы — выходи из офиса у ресепшена 🚪', 'quest'); } };
+    } else if (dayDone) {
+      action = { label: 'Итоги дня →', primary: true, onClick: showDaySummary };
+    }
     openModal({
       title: 'Задача выполнена! 🎉',
       subtitle: quest.title,
@@ -520,15 +546,15 @@ export function createGame({ onNewGame }) {
         h('p', {}, quest.lesson.text),
         h('p', { class: 'muted' }, `${npc.name} говорит спасибо! Можно подойти ещё раз и поболтать.`),
       ),
-      actions: [{
-        label: dayDone ? 'Итоги дня →' : 'Супер!',
-        primary: true,
-        onClick: () => { if (dayDone) showDaySummary(); else closeModal(); },
-      }],
+      actions: [action],
     });
   }
 
   // ---------- Интро, итоги и смена дня ----------
+  const mouseControls = () => (input.mouseMode
+    ? h('div', {}, '🖱️ Двигай мышью — повернуть камеру, ', h('kbd', {}, 'Esc'), ' — показать курсор')
+    : h('div', {}, '🖱️ Зажми мышь и веди — повернуть камеру'));
+
   function showDayIntro() {
     const first = store.currentDay() === 0;
     const touch = input.state.isTouch;
@@ -541,7 +567,7 @@ export function createGame({ onNewGame }) {
           ? h('div', { class: 'controls' },
             touch
               ? [h('div', {}, '🕹️ Стик слева — ходить'), h('div', {}, '👆 Проведи по экрану — повернуть камеру'), h('div', {}, '💬 Кнопка справа — говорить')]
-              : [h('div', {}, h('kbd', {}, 'W A S D'), ' — ходить, ', h('kbd', {}, 'Shift'), ' — бежать'), h('div', {}, '🖱️ Зажми мышь и веди — повернуть камеру'), h('div', {}, h('kbd', {}, 'E'), ' — поговорить / сесть за компьютер')],
+              : [h('div', {}, h('kbd', {}, 'W A S D'), ' — ходить, ', h('kbd', {}, 'Shift'), ' — бежать'), mouseControls(), h('div', {}, h('kbd', {}, 'E'), ' — поговорить / сесть за компьютер')],
           )
           : null,
       ),
@@ -573,12 +599,14 @@ export function createGame({ onNewGame }) {
     });
   }
 
+  // Выход из офиса: в последний день — сразу финал, иначе — итоги дня
+  function leaveOffice() {
+    if (isLastDay()) showFinale();
+    else showDaySummary();
+  }
+
   function endDay() {
-    if (store.currentDay() === DAYS.length - 1) {
-      store.setFinished();
-      showFinale();
-      return;
-    }
+    if (isLastDay()) { showFinale(); return; }
     store.advanceDay(); // onChange → refresh: двери, NPC и журнал нового дня
     const spawn = office.spots.spawn;
     player.place(spawn.x, spawn.z, spawn.face);
@@ -588,12 +616,21 @@ export function createGame({ onNewGame }) {
     showDayIntro();
   }
 
+  // Финал стажировки: итоги последнего дня и всей игры. Повторный выход снова открывает это окно
   function showFinale() {
+    if (!store.getState().finished) {
+      store.setFinished();
+      refresh(); // setFinished не оповещает подписчиков — подсказка журнала меняется здесь
+    }
     openModal({
-      title: `Поздравляем, ${name()}! 🏆`,
-      subtitle: `${DAYS.length} ${daysWord(DAYS.length)} стажировки в «жыбий рыр» позади`,
-      body: h('div', { class: 'lesson' },
-        h('p', {}, 'Ты помог всей команде и попробовал себя в разных ролях IT-компании:'),
+      title: `Стажировка пройдена, ${name()}! 🏆`,
+      subtitle: `${DAYS.length} ${daysWord(DAYS.length)} стажировки позади — игра завершена`,
+      body: h('div', { class: 'lesson day-summary' },
+        h('p', {}, 'Ты прошёл все рабочие дни. Можешь дальше гулять по офису, болтать с командой, пить раф и играть в пинг-понг.'),
+        h('h3', {}, '💡 Что ты узнал в последний день'),
+        h('ul', { class: 'roles' }, dayQuests().map((q) => h('li', {}, h('b', {}, q.lesson.title), ` — ${q.lesson.text}`))),
+        h('p', {}, day().summary.insight),
+        h('h3', {}, '🧑‍💻 Роли, которые ты попробовал'),
         h('ul', { class: 'roles' }, QUESTS.map((q) => {
           const npc = npcDef(q.npc);
           return h('li', {}, h('b', {}, q.lesson.title), ` — ${npc.name}, ${npc.role}`);
@@ -602,7 +639,7 @@ export function createGame({ onNewGame }) {
       ),
       actions: [
         { label: 'Начать заново', onClick: () => { closeModal(); onNewGame(); } },
-        { label: 'Гулять по офису', primary: true },
+        { label: 'Гулять по офису', primary: true, onClick: () => { closeModal(); hud.toast('Офис твой — гуляй сколько хочешь. Новая игра — в меню ☰'); } },
       ],
     });
   }
@@ -630,7 +667,7 @@ export function createGame({ onNewGame }) {
     if (player.seated) { props.interact(); return; }
     if (nearMarker) activateMarker(nearMarker);
     else if (nearFire) { if (canExtinguish(nearFire)) extinguish(nearFire); }
-    else if (nearExit) showDaySummary();
+    else if (nearExit) leaveOffice();
     else if (nearNpc) talk(nearNpc);
     else if (!pingPong.interact()) props.interact();
   }
@@ -689,10 +726,10 @@ export function createGame({ onNewGame }) {
       return;
     }
     if (!nearMarker) lastMarkerAuto = null;
-    // Итоги дня на маркере выхода — тоже один раз, пока игрок не сойдёт с маркера
+    // Итоги дня (в последний день — финал) на маркере выхода — тоже один раз, пока игрок не сойдёт с маркера
     if (!nearMarker && nearExit && !lastExitAuto) {
       lastExitAuto = true;
-      showDaySummary();
+      leaveOffice();
       return;
     }
     if (!nearExit) lastExitAuto = false;
@@ -708,7 +745,7 @@ export function createGame({ onNewGame }) {
       hud.setPrompt(nearFire.step.need ?? nearFire.step.hint);
       input.setActionVisible(false);
     } else if (nearExit) {
-      hud.setPrompt(`${key}Завершить рабочий день`);
+      hud.setPrompt(`${key}${isLastDay() ? 'Выйти из офиса' : 'Завершить рабочий день'}`);
       input.setActionVisible(true, '🚪');
     } else if (nearNpc) {
       hud.setPrompt(`${key}Поговорить: ${nearNpc.def.name}`);
@@ -721,20 +758,32 @@ export function createGame({ onNewGame }) {
   }
 
   // ---------- Цикл ----------
+  // Размер рендера — реальный размер канваса (его задаёт CSS inset: 0), а не innerWidth/innerHeight:
+  // на iOS они расходятся (панель Safari, клавиатура, поворот) и картинка растягивается
+  const view = { w: 0, h: 0, dpr: 0 };
+  const pixelRatio = () => Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2);
   function resize() {
-    const w = window.innerWidth;
-    const hgt = window.innerHeight;
+    const w = canvas.clientWidth || window.innerWidth;
+    const hgt = canvas.clientHeight || window.innerHeight;
+    const dpr = pixelRatio();
+    if (w === view.w && hgt === view.h && dpr === view.dpr) return;
+    Object.assign(view, { w, h: hgt, dpr });
+    renderer.setPixelRatio(dpr); // зум страницы (Safari «aA») меняет devicePixelRatio
     renderer.setSize(w, hgt, false);
     camera.aspect = w / hgt;
     camera.fov = w < hgt ? 72 : 60;
     camera.updateProjectionMatrix();
   }
-  window.addEventListener('resize', resize);
+  // iOS в первом событии поворота отдаёт старые размеры — пересчитываем ещё раз на следующем кадре
+  const resizeSoon = () => { resize(); requestAnimationFrame(resize); };
+  new ResizeObserver(resize).observe(canvas);
+  window.addEventListener('resize', resizeSoon);
+  window.addEventListener('orientationchange', resizeSoon);
+  window.visualViewport?.addEventListener('resize', resizeSoon);
   resize();
 
   const clock = new THREE.Clock();
   let saveTimer = 0;
-  let running = false;
 
   function savePose() {
     const rest = player.seated?.stand ?? player.position; // сидя сохраняем точку «встать», а не центр пуфика
@@ -747,6 +796,7 @@ export function createGame({ onNewGame }) {
   function frame() {
     const dt = Math.min(clock.getDelta(), 0.05);
     const time = clock.elapsedTime;
+    resize(); // страховка от пропущенных событий: при неизменном размере — сразу return
     input.update();
     props.update(dt, time);
     player.update(dt, input, time);
@@ -778,7 +828,7 @@ export function createGame({ onNewGame }) {
         h('p', {}, 'Прогресс сохраняется автоматически в этом браузере.'),
         h('div', { class: 'controls' },
           h('div', {}, h('kbd', {}, 'W A S D'), ' / стик — ходить, ', h('kbd', {}, 'Shift'), ' — бежать'),
-          h('div', {}, 'Мышь или палец — поворот камеры'),
+          input.state.isTouch ? h('div', {}, '👆 Проведи по экрану — поворот камеры') : mouseControls(),
           h('div', {}, h('kbd', {}, 'E'), ' / 💬 — взаимодействие'),
         ),
       ),
@@ -807,6 +857,17 @@ export function createGame({ onNewGame }) {
       player,
       camera,
       renderer,
+      pointerLocked: () => input.state.pointerLocked,
+      viewport: () => {
+        const buffer = renderer.getDrawingBufferSize(new THREE.Vector2());
+        return {
+          inner: { w: window.innerWidth, h: window.innerHeight },
+          client: { w: canvas.clientWidth, h: canvas.clientHeight },
+          buffer: { w: buffer.x, h: buffer.y },
+          dpr: renderer.getPixelRatio(),
+          aspect: camera.aspect,
+        };
+      },
       ceilingHeight: office.ceilingHeight,
       teleport: (x, z, face = 0) => player.place(x, z, face),
       spots: office.spots,
@@ -837,10 +898,17 @@ export function createGame({ onNewGame }) {
       completeDay: () => { dayQuests().forEach((q) => store.setQuestStatus(q.id, QuestStatus.DONE)); },
       endDay,
       summary: showDaySummary,
+      // Перейти в последний день и выполнить его квесты (выход из офиса откроет финал)
+      lastDay: () => {
+        while (!isLastDay()) store.advanceDay();
+        dayQuests().forEach((q) => store.setQuestStatus(q.id, QuestStatus.DONE));
+      },
+      finale: showFinale,
       seats: office.seats,
       sit: (k) => player.sit(office.seats[k]),
       stand: () => player.stand(),
       coffee: () => props.brewCoffee(),
+      cameraState: () => ({ yaw: player.yaw, pitch: player.pitch, showcase: player.inShowcase }),
       bsod: () => SCREENS.bsod({ duration: 5 }),
       // Запустить подход NPC для текущего approach-шага
       approach: () => {
@@ -869,6 +937,7 @@ export function createGame({ onNewGame }) {
       placeNpcs();
       hud.show();
       running = true;
+      input.setRunning(true);
       input.setEnabled(true);
       if (!s.dayIntroShown) showDayIntro();
       // Перезагрузка посреди полноэкранной сцены — показываем её снова
@@ -878,10 +947,14 @@ export function createGame({ onNewGame }) {
       }
       // Если игрок сохранился, стоя на маркере, не открываем мини-игру или итоги сразу
       checkInteractionsSilently();
+      input.lockPointer(); // старт — клик по кнопке, захват разрешён; при открытом интро — после него
+      updateLockHint();
     },
     stop() {
       running = false;
+      input.setRunning(false);
       input.setEnabled(false);
+      hud.setLockHint(false);
       hud.hide();
       hud.setPrompt(null);
       input.setActionVisible(false);

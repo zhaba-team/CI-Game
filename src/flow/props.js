@@ -25,9 +25,11 @@ export function createProps({ seats, coffee, coffeeSpot, player, hud, input, han
     if (coffee.busy || player.seated) return;
     player.setFrozen(true);
     coffee.play(player, () => {
+      player.endShowcase();
       player.setFrozen(false);
       hud.toast('☕ Лавандовый раф выпит — бодрость на весь рабочий день!');
     });
+    player.startShowcase(); // после play: игрок уже развёрнут к машине — камера сбоку, видно, как он пьёт
   }
 
   return {
