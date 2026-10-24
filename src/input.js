@@ -1,5 +1,8 @@
 // Ввод: клавиатура, мышь (на десктопе — захват курсора, иначе вращение камеры перетаскиванием),
-// сенсорный стик и кнопка действия.
+// сенсорный стик и кнопка действия. Тап / клик по сцене (onTap) — для предметов, по которым можно ткнуть.
+const TAP_MOVE = 10;  // px: палец сдвинулся сильнее — это поворот камеры, а не тап
+const TAP_TIME = 350; // мс: дольше — тоже не тап
+
 export function createInput(canvas) {
   const keys = new Set();
   const state = {
@@ -13,6 +16,9 @@ export function createInput(canvas) {
   };
   const actionHandlers = new Set();
   const fireAction = () => { if (state.enabled) actionHandlers.forEach((fn) => fn()); };
+  const tapHandlers = new Set();
+  // ndc — точка экрана в координатах -1..1, y вверх
+  const fireTap = (ndc) => { if (state.enabled && running) tapHandlers.forEach((fn) => fn(ndc)); };
 
   // ---------- Клавиатура ----------
   window.addEventListener('keydown', (e) => {
@@ -50,13 +56,18 @@ export function createInput(canvas) {
   });
 
   // ---------- Мышь / тач-перетаскивание для обзора (фолбэк, пока курсор не захвачен) ----------
+  // Тап — короткое касание без сдвига. Мышь в mouseMode тапом не считается: её клик — захват курсора
   let lookPointer = null;
   let last = { x: 0, y: 0 };
+  let tap = null; // { x, y, time, moved } — начало касания, пока оно может оказаться тапом
   canvas.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'mouse' && mouseMode && !isLocked()) lockPointer(); // клик — захват, без fireAction
+    const lockingMouse = e.pointerType === 'mouse' && mouseMode;
+    if (lockingMouse && isLocked()) { fireTap({ x: 0, y: 0 }); return; } // курсор захвачен — клик туда, куда смотрит камера
+    if (lockingMouse) lockPointer(); // клик — захват, без fireAction
     if (lookPointer !== null || isLocked()) return;
     lookPointer = e.pointerId;
     last = { x: e.clientX, y: e.clientY };
+    tap = lockingMouse ? null : { x: e.clientX, y: e.clientY, time: performance.now(), moved: 0 };
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch { /* пока ждём ответа на захват курсора, браузер не даёт pointer capture — перетаскивание работает и без него */ }
@@ -67,8 +78,18 @@ export function createInput(canvas) {
     state.lookDelta.y += e.clientY - last.y;
     state.lastLookTime = performance.now();
     last = { x: e.clientX, y: e.clientY };
+    if (tap) tap.moved = Math.max(tap.moved, Math.hypot(e.clientX - tap.x, e.clientY - tap.y));
   });
-  const endLook = (e) => { if (e.pointerId === lookPointer) lookPointer = null; };
+  const endLook = (e) => {
+    if (e.pointerId !== lookPointer) return;
+    lookPointer = null;
+    const start = tap;
+    tap = null;
+    if (e.type !== 'pointerup' || !start) return;
+    if (start.moved > TAP_MOVE || performance.now() - start.time > TAP_TIME) return;
+    const r = canvas.getBoundingClientRect();
+    fireTap({ x: ((e.clientX - r.left) / r.width) * 2 - 1, y: -((e.clientY - r.top) / r.height) * 2 + 1 });
+  };
   canvas.addEventListener('pointerup', endLook);
   canvas.addEventListener('pointercancel', endLook);
 
@@ -124,6 +145,8 @@ export function createInput(canvas) {
   return {
     state,
     onAction(fn) { actionHandlers.add(fn); },
+    // fn({ x, y }) — тап / клик по сцене в координатах экрана -1..1 (при захвате курсора — центр экрана)
+    onTap(fn) { tapHandlers.add(fn); },
     get mouseMode() { return mouseMode; },
     // Игра запущена / остановлена: вне игры курсор не захватываем
     setRunning(value) {

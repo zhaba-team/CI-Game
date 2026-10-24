@@ -3,13 +3,15 @@
 // Окна — настоящие проёмы со стеклом; наружу смотрят северная и западная стены и окна Игровой.
 // Двери в кабинет, серверную и столовую закрываются по рабочим дням (setLocks), у южной стены — выход из офиса.
 // Возвращает сцену-группу, список коллайдеров (AABB в плоскости XZ),
-// объекты, загораживающие камеру, и именованные точки (spots) для NPC и маркеров.
+// объекты, загораживающие камеру, именованные точки (spots) для NPC и маркеров
+// и интерактивные предметы: пуфики, кофемашину, теннисный стол и книжный шкаф (bookshelf — База знаний).
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mat, glow, box, cyl, ico, group, textPlane } from './lowpoly.js';
 import { createWallSign } from './signs.js';
 import { buildExtinguisher } from './fire.js';
 import { buildGameRoom } from './gameRoom.js';
+import { buildBookshelf } from './bookshelf.js';
 import { addOfficeDecor } from './decor.js';
 
 const WALL_H = 4.2;
@@ -492,14 +494,12 @@ export function buildOffice() {
   spots.teamlead = { x: -2.5, z: -4.6, face: Math.PI * 0.6 };
   // Куда тимлид подходит к игроку у deskRelease в пятницу: сбоку от стула, лицом к игроку; path — точки по пути от стола
   spots.teamleadRelease = { x: -3.3, z: 0.35, face: Math.atan2(-1.2, -0.6), path: [{ x: -2.6, z: -1.0 }] };
-  root.add(box(1.6, 1.8, 0.4, '#6b4f36', SHELF_X, 0, -11.6)); // шкаф с книгами
-  for (let k = 0; k < 4; k++) {
-    root.add(box(1.5, 0.04, 0.38, '#5a412c', SHELF_X, 0.4 + k * 0.45, -11.55));
-    for (let b = 0; b < 5; b++) {
-      root.add(box(0.2, 0.32, 0.26, ['#ef476f', '#118ab2', '#ffd166', '#06d6a0', '#8338ec'][(b + k) % 5], SHELF_X - 0.55 + b * 0.27, 0.44 + k * 0.45, -11.5));
-    }
-  }
+  // Шкаф с книгами — Полка с Базой знаний; spots.bookshelf — маркер перед ним (лицевая сторона z ≈ -11.4)
+  const bookshelf = buildBookshelf();
+  bookshelf.group.position.set(SHELF_X, 0, -11.6);
+  root.add(bookshelf.group);
   solid(SHELF_X - 0.85, -11.85, SHELF_X + 0.85, -11.3);
+  spots.bookshelf = { x: SHELF_X, z: -10.6 };
 
   // ---------- Столовая ----------
   // Диван у южной стены, кухонная стойка с кофемашиной и микроволновкой у западной, холодильник и кулер
@@ -700,5 +700,6 @@ export function buildOffice() {
     seats: gameRoom.seats,
     coffee: gameRoom.coffee,
     pingPong: gameRoom.pingPong,
+    bookshelf,
   };
 }

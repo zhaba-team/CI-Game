@@ -20,6 +20,7 @@ function emptyState(name) {
     day: 0,               // индекс текущего рабочего дня в DAYS (quests/days.js)
     dayIntroShown: false, // интро текущего дня уже закрыто
     finished: false,      // последний день завершён — стажировка пройдена
+    kbSeen: [],           // id терминов Базы знаний (quests/glossary.js), которые игрок уже видел открытыми
   };
 }
 
@@ -112,6 +113,19 @@ export function advanceDay() {
 
 export function setFinished() {
   state.finished = true;
+  persist();
+}
+
+// Просмотренные термины Базы знаний: открытые, но не просмотренные помечаются «NEW»
+export function kbSeen() {
+  return state.kbSeen;
+}
+
+// HUD это не интересует — подписчиков не оповещаем
+export function markKbSeen(ids) {
+  const fresh = ids.filter((id) => !state.kbSeen.includes(id));
+  if (!fresh.length) return;
+  state.kbSeen = [...state.kbSeen, ...fresh];
   persist();
 }
 

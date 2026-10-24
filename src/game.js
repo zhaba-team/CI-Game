@@ -1,6 +1,6 @@
 // Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов,
 // шаги многошаговых квестов (диалог, подход NPC, предмет, тушение огня, мини-игра, полноэкранная сцена),
-// рабочие дни (интро, итоги, переход к следующему дню, вечер), пинг-понг в Игровой и финал.
+// рабочие дни (интро, итоги, переход к следующему дню, вечер), пинг-понг в Игровой, База знаний на полке и финал.
 import * as THREE from 'three';
 import { buildOffice } from './world/office.js';
 import { buildSky, SKY_DAY, SKY_EVENING } from './world/sky.js';
@@ -11,14 +11,17 @@ import { createFire, buildExtinguisher } from './world/fire.js';
 import { createInput } from './input.js';
 import { createProps } from './flow/props.js';
 import { createPingPong } from './flow/pingPong.js';
+import { createKnowledgeBase } from './flow/knowledge.js';
 import { buildHeldRacket } from './world/gameRoom.js';
 import { createHud } from './ui/hud.js';
 import { h } from './ui/dom.js';
 import { openModal, closeModal, onModalChange, isModalOpen } from './ui/modal.js';
+import { renderKnowledgeBase } from './ui/knowledgeBase.js';
 import { SCREENS } from './ui/screens.js';
 import { NPCS } from './quests/npcs.js';
 import { QUESTS, fillTemplate, questSteps, stepAt } from './quests/quests.js';
 import { DAYS, questsOfDay, dayOfQuest, lockedRooms, isEvening } from './quests/days.js';
+import { GLOSSARY, validateGlossary } from './quests/glossary.js';
 import { getMinigame } from './minigames/index.js';
 import * as store from './state.js';
 
@@ -66,6 +69,7 @@ export function createGame({ onNewGame }) {
   for (const q of QUESTS) {
     if (dayOfQuest(q.id) === -1) throw new Error(`Квест «${q.id}» не привязан ни к одному дню (src/quests/days.js)`);
   }
+  validateGlossary(QUESTS);
 
   const canvas = document.getElementById('game');
   const isMobile = window.matchMedia('(pointer: coarse)').matches;
@@ -192,6 +196,21 @@ export function createGame({ onNewGame }) {
   let fireBurning = false; // хоть одна стойка горит — свет серверной мерцает
   const exitMarker = createQuestMarker(office.spots.exit.x, office.spots.exit.z, { color: '#2e9e5b', beam: '#9be7b4' });
   scene.add(exitMarker.group);
+  // База знаний: фиолетовый маркер у книжного шкафа open-space
+  const kbMarker = createQuestMarker(office.spots.bookshelf.x, office.spots.bookshelf.z, { color: '#9b5de5', beam: '#d7b8ff' });
+  scene.add(kbMarker.group);
+  const knowledge = createKnowledgeBase({
+    bookshelf: office.bookshelf,
+    spot: office.spots.bookshelf,
+    marker: kbMarker,
+    camera,
+    player,
+    hud,
+    openModal,
+    render: renderKnowledgeBase,
+    sections: () => knowledgeSections(),
+    markSeen: store.markKbSeen,
+  });
 
   const name = () => store.getState().name;
   const t = (text) => fillTemplate(text, name());
@@ -242,6 +261,24 @@ export function createGame({ onNewGame }) {
   };
   // NPC приходит в офис в день своего первого квеста; NPC без квестов в офисе всегда
   const npcArrived = (npc) => !QUESTS.some((q) => q.npc === npc.def.id) || questOfNpc(npc.def.id) !== null;
+
+  // ---------- База знаний ----------
+  // Термин открыт, когда его квест выполнен; замок подсказывает, что сделать или в какой день он откроется
+  function glossaryCard(entry) {
+    const open = !entry.quest || store.questStatus(entry.quest) === QuestStatus.DONE;
+    const card = { ...entry, open, hint: null, isNew: open && !store.kbSeen().includes(entry.id) };
+    if (open) return card;
+    const questDay = dayOfQuest(entry.quest);
+    const quest = QUESTS.find((q) => q.id === entry.quest);
+    card.hint = questDay <= store.currentDay() ? `Выполни задачу «${quest.title}»` : `Откроется: ${DAYS[questDay].title}`;
+    return card;
+  }
+  // Секции модалки: «Старт» и по секции на каждый день; дни без терминов не выводим
+  function knowledgeSections() {
+    const ofDay = (dayIndex) => GLOSSARY.filter((e) => e.quest && dayOfQuest(e.quest) === dayIndex);
+    const list = [{ title: 'Старт', entries: GLOSSARY.filter((e) => !e.quest) }, ...DAYS.map((d, i) => ({ title: d.title, entries: ofDay(i) }))];
+    return list.filter((s) => s.entries.length).map((s) => ({ title: s.title, entries: s.entries.map(glossaryCard) }));
+  }
 
   // ---------- Вечер ----------
   let eveningOn = null;
@@ -545,6 +582,9 @@ export function createGame({ onNewGame }) {
         h('div', { class: 'lesson-tag' }, `💡 Что ты узнал: ${quest.lesson.title}`),
         h('p', {}, quest.lesson.text),
         h('p', { class: 'muted' }, `${npc.name} говорит спасибо! Можно подойти ещё раз и поболтать.`),
+        GLOSSARY.some((e) => e.quest === quest.id)
+          ? h('p', { class: 'muted' }, '📚 Новые термины — в Базе знаний на книжной полке в open-space.')
+          : null,
       ),
       actions: [action],
     });
@@ -669,9 +709,13 @@ export function createGame({ onNewGame }) {
     else if (nearFire) { if (canExtinguish(nearFire)) extinguish(nearFire); }
     else if (nearExit) leaveOffice();
     else if (nearNpc) talk(nearNpc);
-    else if (!pingPong.interact()) props.interact();
+    else if (!pingPong.interact() && !knowledge.interact()) props.interact();
   }
   input.onAction(interact);
+  // Тап / клик по книжному шкафу открывает Базу знаний (рядом) или просит подойти ближе
+  input.onTap((ndc) => {
+    if (!isModalOpen() && !props.busy && !player.seated && !cutscene) knowledge.tap(ndc);
+  });
 
   function markerPrompt(m) {
     if (m.step?.type === 'talk') return { text: `Поговорить: ${npcDef(m.step.npc).name}`, icon: '💬' };
@@ -751,7 +795,7 @@ export function createGame({ onNewGame }) {
       hud.setPrompt(`${key}Поговорить: ${nearNpc.def.name}`);
       input.setActionVisible(true, '💬');
     } else {
-      const prop = pingPong.check() ?? props.check();
+      const prop = pingPong.check() ?? knowledge.check() ?? props.check();
       hud.setPrompt(prop ? `${prop.action ? key : ''}${prop.text}` : null);
       input.setActionVisible(Boolean(prop?.action), prop?.icon);
     }
@@ -809,6 +853,7 @@ export function createGame({ onNewGame }) {
       serverLight.intensity = 6 + Math.sin(time * 11) * 1.6 + Math.sin(time * 23) * 0.8;
     }
     if (exitMarker.group.visible) exitMarker.update(time);
+    knowledge.update(time);
     for (const fn of office.animated) fn(time);
     sky.update(time);
     if (running) checkInteractions();
@@ -919,6 +964,8 @@ export function createGame({ onNewGame }) {
       },
       evening: (on) => applyTimeOfDay(on),
       pingPong: (npcId) => pingPong.start(npcId),
+      knowledge: () => knowledge.open(),
+      knowledgeNew: () => knowledge.newCount(),
       npc: (id) => npcById(id),
       office,
     };
