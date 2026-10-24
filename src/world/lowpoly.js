@@ -50,8 +50,8 @@ export function group(...children) {
   return g;
 }
 
-// Текстура-надпись для спрайтов (имена над NPC, вывески).
-export function textSprite(text, { color = '#fff', bg = 'rgba(18,53,36,0.85)', size = 48, height = 0.35 } = {}) {
+// Холст с надписью: общая отрисовка для спрайтов и надписей на поверхностях.
+function textCanvas(text, { color, bg, size }) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   const font = `800 ${size}px Nunito, system-ui, sans-serif`;
@@ -73,10 +73,36 @@ export function textSprite(text, { color = '#fff', bg = 'rgba(18,53,36,0.85)', s
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, w / 2, h / 2 + size * 0.05);
+  return { canvas, w, h };
+}
+
+function canvasTexture(canvas) {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+  return tex;
+}
+
+// Текстура-надпись для спрайтов (имена над NPC, вывески).
+export function textSprite(text, { color = '#fff', bg = 'rgba(18,53,36,0.85)', size = 48, height = 0.35 } = {}) {
+  const { canvas, w, h } = textCanvas(text, { color, bg, size });
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTexture(canvas), depthWrite: false }));
   sprite.scale.set(height * (w / h), height, 1);
   return sprite;
+}
+
+// Надпись на поверхности (принт на одежде, табличка). Лицевая сторона смотрит в +z.
+export function textPlane(text, { color = '#fff', bg = null, size = 64, height = 0.1 } = {}) {
+  const { canvas, w, h } = textCanvas(text, { color, bg, size });
+  const material = new THREE.MeshStandardMaterial({
+    map: canvasTexture(canvas),
+    transparent: true,
+    roughness: 0.9,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    depthWrite: false,
+  });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(height * (w / h), height), material);
+  plane.castShadow = false;
+  return plane;
 }
