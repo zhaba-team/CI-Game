@@ -1,19 +1,49 @@
 // Сборка low-poly персонажей из примитивов. Внешность описывается объектом style,
 // поэтому новых NPC можно добавлять без моделей — достаточно описать стиль.
 import * as THREE from 'three';
-import { mat, box, ico } from './lowpoly.js';
+import { mat, box, ico, textPlane } from './lowpoly.js';
 
+// Цвета — hex-строки. Поля одежды collar / belt / cargo / soles / chestText по умолчанию выключены (null).
 const DEFAULT_STYLE = {
   skin: '#f1c7a1',
   shirt: '#3f8f5f',
   pants: '#2f3a4a',
   shoes: '#222222',
   hair: '#3b2a20',
-  hairStyle: 'short', // short | long | bun | spiky | none
+  hairStyle: 'short', // short | parted | long | bun | spiky | none
+  beardStyle: 'none', // none | full | goatee | stubble
+  beardColor: null,   // по умолчанию — цвет hair
+  mouth: 'smile',     // smile | grin | neutral
   accent: '#ffffff',
   accessories: [],    // glasses | beard | beret | beanie | headphones | tie | jacket | backpack | badge | scarf | hood
+  collar: null,       // расстёгнутый ворот рубашки (цвет)
+  belt: null,         // ремень с пряжкой (цвет)
+  cargo: null,        // боковые карманы на штанах (цвет)
+  soles: null,        // светлая подошва кроссовок (цвет)
+  sleeves: 'long',    // long | short
+  chestText: null,    // надпись на груди (строка)
+  chestTextColor: '#ffffff',
+  build: 1,           // массивность: 1 — обычная, >1 — шире и плотнее
   height: 1,
 };
+
+const HAIR_STYLES = ['short', 'parted', 'long', 'bun', 'spiky', 'none'];
+const BEARD_STYLES = ['none', 'full', 'goatee', 'stubble'];
+const MOUTHS = ['smile', 'grin', 'neutral'];
+const SLEEVES = ['long', 'short'];
+const ACCESSORIES = ['glasses', 'beard', 'beret', 'beanie', 'headphones', 'tie', 'jacket', 'backpack', 'badge', 'scarf', 'hood'];
+
+// Только в dev-сборке: подсказывает об опечатках в style, в продакшене вырезается.
+function warnUnknownStyle(s) {
+  const check = (field, value, allowed) => {
+    if (!allowed.includes(value)) console.warn(`[characters] неизвестное значение style.${field}: ${value}`);
+  };
+  check('hairStyle', s.hairStyle, HAIR_STYLES);
+  check('beardStyle', s.beardStyle, BEARD_STYLES);
+  check('mouth', s.mouth, MOUTHS);
+  check('sleeves', s.sleeves, SLEEVES);
+  s.accessories.forEach((a) => check('accessories', a, ACCESSORIES));
+}
 
 function limb(w, h, d, color, pivotY, pivotX) {
   const pivot = new THREE.Group();
@@ -30,6 +60,19 @@ function addHair(head, s) {
       head.add(box(0.44, 0.12, 0.42, c, 0, 0.4, -0.01));
       head.add(box(0.44, 0.28, 0.08, c, 0, 0.18, -0.19));
       break;
+    case 'parted': {
+      // Опрятная короткая стрижка: шапка, чёлка набок с пробором, виски, затылок.
+      // Все грани вынесены за поверхность головы — без совпадающих плоскостей.
+      head.add(box(0.43, 0.07, 0.41, c, 0, 0.45, -0.005));
+      const fringe = box(0.29, 0.07, 0.08, c, 0.045, 0.46, 0.175);
+      fringe.rotation.z = -0.08;
+      head.add(fringe);
+      head.add(box(0.11, 0.05, 0.06, c, -0.15, 0.455, 0.18)); // чёлка за пробором, ниже основной
+      for (const sx of [-1, 1]) head.add(box(0.03, 0.17, 0.3, c, sx * 0.21, 0.3, -0.035)); // виски над зоной ушей
+      head.add(box(0.42, 0.3, 0.04, c, 0, 0.17, -0.195));   // затылок
+      head.add(box(0.34, 0.07, 0.03, c, 0, 0.11, -0.185));  // сужение к шее
+      break;
+    }
     case 'long':
       head.add(box(0.46, 0.13, 0.44, c, 0, 0.4, -0.01));
       head.add(box(0.48, 0.55, 0.1, c, 0, -0.08, -0.2));
@@ -52,12 +95,87 @@ function addHair(head, s) {
         spike.castShadow = true;
         head.add(spike);
       }
-      head.add(box(0.44, 0.08, 0.42, c, 0, 0.4, 0));
+      head.add(box(0.44, 0.08, 0.42, c, 0, 0.41, 0)); // верх выше макушки: иначе z-fighting
       head.add(box(0.44, 0.3, 0.08, c, 0, 0.16, -0.19));
       break;
     default:
       break;
   }
+}
+
+function addBeard(head, s) {
+  // Аксессуар beard — прежний способ задать полную бороду
+  const kind = s.beardStyle === 'none' && s.accessories.includes('beard') ? 'full' : s.beardStyle;
+  const c = s.beardColor ?? s.hair;
+  switch (kind) {
+    case 'full':
+      head.add(box(0.42, 0.16, 0.08, c, 0, -0.02, 0.17));
+      head.add(box(0.16, 0.04, 0.03, c, 0, 0.12, 0.2));
+      break;
+    case 'goatee':
+      head.add(box(0.2, 0.15, 0.1, c, 0, -0.08, 0.16));     // клин на подбородке
+      head.add(box(0.22, 0.04, 0.03, c, 0, 0.135, 0.2));    // усы
+      head.add(box(0.04, 0.1, 0.03, c, -0.11, 0.04, 0.2));  // перемычки по углам рта
+      head.add(box(0.04, 0.1, 0.03, c, 0.11, 0.04, 0.2));
+      break;
+    case 'stubble': {
+      const m = mat(c, { transparent: true, opacity: 0.55 });
+      head.add(box(0.41, 0.13, 0.012, null, 0, 0.04, 0.192, m));
+      head.add(box(0.02, 0.13, 0.3, null, -0.205, 0.04, 0.03, m));
+      head.add(box(0.02, 0.13, 0.3, null, 0.205, 0.04, 0.03, m));
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+function addMouth(head, s) {
+  switch (s.mouth) {
+    case 'grin':
+      head.add(box(0.18, 0.06, 0.02, '#5a1f1f', 0, 0.07, 0.19));
+      head.add(box(0.15, 0.022, 0.021, '#ffffff', 0, 0.105, 0.192)); // зубы
+      break;
+    case 'neutral':
+      head.add(box(0.11, 0.018, 0.02, '#8c5546', 0, 0.1, 0.19));
+      break;
+    default:
+      head.add(box(0.12, 0.025, 0.02, '#b5654f', 0, 0.1, 0.19));
+      break;
+  }
+}
+
+// Детали одежды: ворот, ремень, карманы-карго, подошвы. Каждая включается своим цветом в style.
+function addClothes(parts, s) {
+  const { torso, legL, legR } = parts;
+  if (s.collar) {
+    torso.add(box(0.1, 0.1, 0.01, s.skin, 0, 0.55, 0.163)); // V-вырез
+    for (const sx of [-1, 1]) {
+      const wing = box(0.11, 0.07, 0.03, s.collar, sx * 0.07, 0.6, 0.165);
+      wing.rotation.z = sx * 0.5;
+      torso.add(wing);
+    }
+  }
+  if (s.belt) {
+    torso.add(box(0.58, 0.06, 0.34, s.belt, 0, 0, 0));
+    torso.add(box(0.08, 0.05, 0.02, '#c9c9c9', 0, 0.005, 0.172)); // пряжка
+  }
+  for (const [leg, sx] of [[legL, -1], [legR, 1]]) {
+    if (s.cargo) {
+      leg.add(box(0.05, 0.2, 0.17, s.cargo, sx * 0.11 * s.build, -0.52, 0));
+      leg.add(box(0.055, 0.04, 0.18, s.cargo, sx * 0.11 * s.build, -0.34, 0)); // клапан
+    }
+    if (s.soles) leg.add(box(0.23 * s.build, 0.04, 0.31, s.soles, 0, -0.82, 0.04));
+  }
+}
+
+// Принт на груди справа у носящего (слева для зрителя).
+function addChestText(parts, s) {
+  if (!s.chestText) return;
+  const plane = textPlane(s.chestText, { color: s.chestTextColor, height: 0.11 });
+  plane.position.set(-0.13, 0.52, 0.163);
+  plane.scale.x = 1 / s.build; // торс растянут по x — буквы не должны растягиваться
+  parts.torso.add(plane);
 }
 
 function addAccessories(root, parts, s) {
@@ -73,10 +191,6 @@ function addAccessories(root, parts, s) {
     const lens = mat('#bfe6ff', { transparent: true, opacity: 0.55 });
     head.add(box(0.1, 0.06, 0.01, null, -0.1, 0.22, 0.217, lens));
     head.add(box(0.1, 0.06, 0.01, null, 0.1, 0.22, 0.217, lens));
-  }
-  if (has('beard')) {
-    head.add(box(0.42, 0.16, 0.08, s.hair, 0, -0.02, 0.17));
-    head.add(box(0.16, 0.04, 0.03, s.hair, 0, 0.12, 0.2));
   }
   if (has('beret')) {
     const beret = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.25, 0.09, 8), mat(s.accent));
@@ -101,8 +215,9 @@ function addAccessories(root, parts, s) {
     torso.add(box(0.08, 0.38, 0.02, s.accent, 0, 0.2, 0.17));
   }
   if (has('jacket')) {
-    torso.add(box(0.2, 0.62, 0.34, s.jacket, -0.18, 0.02, 0.005));
-    torso.add(box(0.2, 0.62, 0.34, s.jacket, 0.18, 0.02, 0.005));
+    // Полы чуть шире торса, чтобы бока рубашки не просвечивали (z-fighting)
+    torso.add(box(0.21, 0.62, 0.34, s.jacket, -0.185, 0.02, 0.005));
+    torso.add(box(0.21, 0.62, 0.34, s.jacket, 0.185, 0.02, 0.005));
     torso.add(box(0.58, 0.62, 0.1, s.jacket, 0, 0.02, -0.13));
     parts.armL.children[0].material = mat(s.jacket);
     parts.armR.children[0].material = mat(s.jacket);
@@ -131,35 +246,56 @@ function addAccessories(root, parts, s) {
 
 export function createCharacter(styleOverrides = {}) {
   const s = { ...DEFAULT_STYLE, ...styleOverrides };
+  if (import.meta.env.DEV) warnUnknownStyle(s);
+  const b = s.build;
   const root = new THREE.Group();
   const body = new THREE.Group(); // всё, что качается при ходьбе
   root.add(body);
 
-  const legL = limb(0.2, 0.78, 0.22, s.pants, 0.82, -0.13);
-  const legR = limb(0.2, 0.78, 0.22, s.pants, 0.82, 0.13);
-  legL.add(box(0.22, 0.1, 0.3, s.shoes, 0, -0.82, 0.04));
-  legR.add(box(0.22, 0.1, 0.3, s.shoes, 0, -0.82, 0.04));
+  // Штанина заканчивается на верхней грани кроссовка, а не уходит внутрь него
+  const legL = limb(0.2 * b, 0.72, 0.22, s.pants, 0.82, -0.13 * b);
+  const legR = limb(0.2 * b, 0.72, 0.22, s.pants, 0.82, 0.13 * b);
+  legL.add(box(0.22 * b, 0.1, 0.3, s.shoes, 0, -0.82, 0.04));
+  legR.add(box(0.22 * b, 0.1, 0.3, s.shoes, 0, -0.82, 0.04));
+  // Манжета джинсов чуть шире штанины и ложится на верх кроссовка — без совпадающих граней
+  legL.add(box(0.215 * b, 0.05, 0.235, s.pants, 0, -0.74, 0));
+  legR.add(box(0.215 * b, 0.05, 0.235, s.pants, 0, -0.74, 0));
 
+  // Всё, что добавлено в torso (пиджак, ремень, ворот…), масштабируется вместе с ним
   const torso = new THREE.Group();
   torso.position.y = 0.82;
+  torso.scale.set(b, 1, 1 + (b - 1) * 0.5);
   torso.add(box(0.56, 0.68, 0.32, s.shirt, 0, 0, 0));
 
-  const armL = limb(0.15, 0.58, 0.17, s.shirt, 1.42, -0.36);
-  const armR = limb(0.15, 0.58, 0.17, s.shirt, 1.42, 0.36);
+  // Короткий рукав: рука цвета кожи и рукав поверх. Меш руки остаётся children[0] —
+  // на него опирается аксессуар jacket (с коротким рукавом не сочетается).
+  const short = s.sleeves === 'short';
+  const armColor = short ? s.skin : s.shirt;
+  const armL = limb(0.15, 0.58, 0.17, armColor, 1.42, -0.36 * b);
+  const armR = limb(0.15, 0.58, 0.17, armColor, 1.42, 0.36 * b);
+  if (short) {
+    // Рукав чуть выше руки: иначе верхние грани совпадают и мерцают (z-fighting)
+    armL.add(box(0.17, 0.27, 0.19, s.shirt, 0, -0.26, 0));
+    armR.add(box(0.17, 0.27, 0.19, s.shirt, 0, -0.26, 0));
+  }
   armL.add(box(0.13, 0.13, 0.14, s.skin, 0, -0.71, 0));
   armR.add(box(0.13, 0.13, 0.14, s.skin, 0, -0.71, 0));
 
   const head = new THREE.Group();
   head.position.y = 1.5;
+  head.scale.x = 1 + (b - 1) * 0.4; // шире лицо у массивных персонажей
   head.add(box(0.12, 0.08, 0.12, s.skin, 0, 0, 0));          // шея
   head.add(box(0.4, 0.42, 0.38, s.skin, 0, 0.06, 0));        // голова
   head.add(box(0.06, 0.07, 0.02, '#1e1e1e', -0.1, 0.21, 0.19));
   head.add(box(0.06, 0.07, 0.02, '#1e1e1e', 0.1, 0.21, 0.19));
-  head.add(box(0.12, 0.025, 0.02, '#b5654f', 0, 0.1, 0.19)); // улыбка
+  addMouth(head, s);
   addHair(head, s);
+  addBeard(head, s);
 
   body.add(legL, legR, torso, armL, armR, head);
   const parts = { legL, legR, armL, armR, torso, head, body };
+  addClothes(parts, s);
+  addChestText(parts, s);
   addAccessories(root, parts, s);
 
   root.scale.setScalar(s.height);

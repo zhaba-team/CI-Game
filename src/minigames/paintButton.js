@@ -57,7 +57,7 @@ export default {
     );
 
     const site = h('div', { class: 'browser' },
-      h('div', { class: 'browser-bar' }, h('i'), h('i'), h('i'), h('span', {}, 'shop.doncode.ru')),
+      h('div', { class: 'browser-bar' }, h('i'), h('i'), h('i'), h('span', {}, 'shop.жыбийрыр.рф')),
       h('div', { class: 'browser-page shop' },
         h('div', { class: 'shop-img' }, '🎧'),
         h('div', { class: 'shop-info' },

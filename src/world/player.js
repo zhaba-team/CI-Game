@@ -1,5 +1,5 @@
 // Игрок: движение относительно камеры, столкновения со стенами и мебелью,
-// камера от третьего лица за спиной персонажа.
+// камера от третьего лица за спиной персонажа, не выше потолка.
 import * as THREE from 'three';
 import { createCharacter } from './characters.js';
 
@@ -9,6 +9,9 @@ const RUN = 6.2;
 const CAM_DIST = 4.2;
 const CAM_HEIGHT = 1.9;
 const LOOK_HEIGHT = 1.45;
+const CEIL_CLEARANCE = 0.4; // минимальный зазор между камерой и потолком
+const PITCH_MIN = -0.15;
+const PITCH_MAX = 0.65;
 
 export const PLAYER_STYLE = {
   skin: '#f3cfae',
@@ -16,7 +19,7 @@ export const PLAYER_STYLE = {
   pants: '#3a4a6b',
   shoes: '#f4f1ea',
   hair: '#2a1c14',
-  hairStyle: 'spiky',
+  hairStyle: 'parted',
   accent: '#ffd166',     // жёлтый рюкзак
   accent2: '#c99a2e',
   accessories: ['hood', 'backpack', 'badge'],
@@ -49,7 +52,7 @@ function resolveCollisions(pos, colliders) {
   }
 }
 
-export function createPlayer(scene, camera, { colliders, occluders }) {
+export function createPlayer(scene, camera, { colliders, occluders, ceilingHeight = Infinity }) {
   const model = createCharacter(PLAYER_STYLE);
   scene.add(model);
 
@@ -64,6 +67,7 @@ export function createPlayer(scene, camera, { colliders, occluders }) {
   const target = new THREE.Vector3();
   const side = new THREE.Vector3();
   const origin = new THREE.Vector3();
+  const camMaxY = ceilingHeight - CEIL_CLEARANCE;
 
   function place(x, z, face = 0) {
     pos.set(x, 0, z);
@@ -95,6 +99,11 @@ export function createPlayer(scene, camera, { colliders, occluders }) {
       if (hit) free = Math.min(free, hit.distance);
     }
     if (free < len) desired.copy(target).addScaledVector(dir, Math.max(0.6, free - 0.25));
+    // Не даём камере упереться в потолок: сдвигаем её к игроку вдоль луча
+    if (desired.y > camMaxY) {
+      const k = (camMaxY - target.y) / (desired.y - target.y);
+      desired.lerpVectors(target, desired, k);
+    }
     camPos.lerp(desired, lerp);
     camera.position.copy(camPos);
     camera.lookAt(target);
@@ -104,7 +113,7 @@ export function createPlayer(scene, camera, { colliders, occluders }) {
     const look = input.consumeLook();
     const sens = input.state.isTouch ? 0.006 : 0.0045;
     yaw -= look.x * sens;
-    pitch = THREE.MathUtils.clamp(pitch + look.y * sens * 0.6, -0.15, 0.9);
+    pitch = THREE.MathUtils.clamp(pitch + look.y * sens * 0.6, PITCH_MIN, PITCH_MAX);
 
     const { move, run } = input.state;
     const amount = Math.hypot(move.x, move.y);
