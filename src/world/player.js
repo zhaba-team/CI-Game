@@ -16,7 +16,7 @@ export const PLAYER_STYLE = {
   pants: '#3a4a6b',
   shoes: '#f4f1ea',
   hair: '#2a1c14',
-  hairStyle: 'spiky',
+  hairStyle: 'parted',
   accent: '#ffd166',     // жёлтый рюкзак
   accent2: '#c99a2e',
   accessories: ['hood', 'backpack', 'badge'],

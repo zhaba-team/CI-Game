@@ -10,7 +10,7 @@ const DEFAULT_STYLE = {
   pants: '#2f3a4a',
   shoes: '#222222',
   hair: '#3b2a20',
-  hairStyle: 'short', // short | long | bun | spiky | none
+  hairStyle: 'short', // short | parted | long | bun | spiky | none
   beardStyle: 'none', // none | full | goatee | stubble
   beardColor: null,   // по умолчанию — цвет hair
   mouth: 'smile',     // smile | grin | neutral
@@ -27,7 +27,7 @@ const DEFAULT_STYLE = {
   height: 1,
 };
 
-const HAIR_STYLES = ['short', 'long', 'bun', 'spiky', 'none'];
+const HAIR_STYLES = ['short', 'parted', 'long', 'bun', 'spiky', 'none'];
 const BEARD_STYLES = ['none', 'full', 'goatee', 'stubble'];
 const MOUTHS = ['smile', 'grin', 'neutral'];
 const SLEEVES = ['long', 'short'];
@@ -60,6 +60,19 @@ function addHair(head, s) {
       head.add(box(0.44, 0.12, 0.42, c, 0, 0.4, -0.01));
       head.add(box(0.44, 0.28, 0.08, c, 0, 0.18, -0.19));
       break;
+    case 'parted': {
+      // Опрятная короткая стрижка: шапка, чёлка набок с пробором, виски, затылок.
+      // Все грани вынесены за поверхность головы — без совпадающих плоскостей.
+      head.add(box(0.43, 0.07, 0.41, c, 0, 0.45, -0.005));
+      const fringe = box(0.29, 0.07, 0.08, c, 0.045, 0.46, 0.175);
+      fringe.rotation.z = -0.08;
+      head.add(fringe);
+      head.add(box(0.11, 0.05, 0.06, c, -0.15, 0.455, 0.18)); // чёлка за пробором, ниже основной
+      for (const sx of [-1, 1]) head.add(box(0.03, 0.17, 0.3, c, sx * 0.21, 0.3, -0.035)); // виски над зоной ушей
+      head.add(box(0.42, 0.3, 0.04, c, 0, 0.17, -0.195));   // затылок
+      head.add(box(0.34, 0.07, 0.03, c, 0, 0.11, -0.185));  // сужение к шее
+      break;
+    }
     case 'long':
       head.add(box(0.46, 0.13, 0.44, c, 0, 0.4, -0.01));
       head.add(box(0.48, 0.55, 0.1, c, 0, -0.08, -0.2));
@@ -82,7 +95,7 @@ function addHair(head, s) {
         spike.castShadow = true;
         head.add(spike);
       }
-      head.add(box(0.44, 0.08, 0.42, c, 0, 0.4, 0));
+      head.add(box(0.44, 0.08, 0.42, c, 0, 0.41, 0)); // верх выше макушки: иначе z-fighting
       head.add(box(0.44, 0.3, 0.08, c, 0, 0.16, -0.19));
       break;
     default:
@@ -239,10 +252,14 @@ export function createCharacter(styleOverrides = {}) {
   const body = new THREE.Group(); // всё, что качается при ходьбе
   root.add(body);
 
-  const legL = limb(0.2 * b, 0.78, 0.22, s.pants, 0.82, -0.13 * b);
-  const legR = limb(0.2 * b, 0.78, 0.22, s.pants, 0.82, 0.13 * b);
+  // Штанина заканчивается на верхней грани кроссовка, а не уходит внутрь него
+  const legL = limb(0.2 * b, 0.72, 0.22, s.pants, 0.82, -0.13 * b);
+  const legR = limb(0.2 * b, 0.72, 0.22, s.pants, 0.82, 0.13 * b);
   legL.add(box(0.22 * b, 0.1, 0.3, s.shoes, 0, -0.82, 0.04));
   legR.add(box(0.22 * b, 0.1, 0.3, s.shoes, 0, -0.82, 0.04));
+  // Манжета джинсов чуть шире штанины и ложится на верх кроссовка — без совпадающих граней
+  legL.add(box(0.215 * b, 0.05, 0.235, s.pants, 0, -0.74, 0));
+  legR.add(box(0.215 * b, 0.05, 0.235, s.pants, 0, -0.74, 0));
 
   // Всё, что добавлено в torso (пиджак, ремень, ворот…), масштабируется вместе с ним
   const torso = new THREE.Group();
