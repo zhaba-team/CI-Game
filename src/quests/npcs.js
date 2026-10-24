@@ -14,7 +14,7 @@ export const NPCS = [
       hairStyle: 'long',
       jacket: '#1d6f66',
       accent: '#f4a261',
-      accessories: ['jacket', 'headphones'],
+      accessories: ['jacket'],
       height: 0.95,
     },
   },
