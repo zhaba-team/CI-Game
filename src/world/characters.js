@@ -35,6 +35,12 @@ const DEFAULT_STYLE = {
 const SIT_DROP = -0.3;
 const SIT_LEGS = -Math.PI / 2 + 0.12; // ноги вперёд, ступни чуть ниже колен
 const SIT_ARMS = -0.7;                // руки вперёд, на столешницу
+const LOUNGE_ARMS = -0.3;             // поза 'lounge' (пуфик без стола): руки на коленях
+// Жесты правой руки поверх обычной анимации: 'hold' — держит стаканчик перед собой, 'drink' — подносит ко рту
+const GESTURES = {
+  hold: { arm: -1.0, head: 0 },
+  drink: { arm: -2.1, head: -0.25 },
+};
 
 const HAIR_STYLES = ['short', 'parted', 'quiff', 'long', 'bun', 'spiky', 'bob', 'none'];
 const BEARD_STYLES = ['none', 'full', 'trimmed', 'goatee', 'stubble'];
@@ -379,9 +385,17 @@ export function createCharacter(styleOverrides = {}) {
 
   let phase = 0;
   let sitting = false;
+  let armsDown = SIT_ARMS; // руки сидящего: на столе ('sit') или на коленях ('lounge')
+  let gesture = null;
   root.userData.parts = parts;
-  // 'sit' — бёдра на высоте сиденья SEAT_H, ноги вперёд, руки на столе; 'stand' — обычная поза
-  root.userData.setPose = (pose) => { sitting = pose === 'sit'; };
+  // 'sit' — бёдра на высоте сиденья SEAT_H, ноги вперёд, руки на столе; 'lounge' — так же, руки на коленях;
+  // 'stand' — обычная поза
+  root.userData.setPose = (pose) => {
+    sitting = pose === 'sit' || pose === 'lounge';
+    armsDown = pose === 'lounge' ? LOUNGE_ARMS : SIT_ARMS;
+  };
+  // name — ключ GESTURES или null (обычная анимация руки)
+  root.userData.setGesture = (name) => { gesture = GESTURES[name] ?? null; };
   // speed — текущая скорость (м/с), чтобы анимация ходьбы соответствовала движению
   root.userData.animate = (dt, speed, time) => {
     const moving = speed > 0.1 && !sitting;
@@ -389,11 +403,12 @@ export function createCharacter(styleOverrides = {}) {
     const swing = moving ? Math.sin(phase) * Math.min(0.7, speed * 0.16) : 0;
     const lerp = 1 - Math.exp(-dt * 12);
     const leg = sitting ? SIT_LEGS : 0;
-    const arm = sitting ? SIT_ARMS : 0;
+    const arm = sitting ? armsDown : 0;
     legL.rotation.x += (leg + swing - legL.rotation.x) * lerp;
     legR.rotation.x += (leg - swing - legR.rotation.x) * lerp;
     armL.rotation.x += (arm - swing - armL.rotation.x) * lerp;
-    armR.rotation.x += (arm + swing - armR.rotation.x) * lerp;
+    armR.rotation.x += ((gesture ? gesture.arm : arm + swing) - armR.rotation.x) * lerp;
+    head.rotation.x += ((gesture ? gesture.head : 0) - head.rotation.x) * lerp;
     const base = sitting ? SIT_DROP : 0;
     body.position.y = base + (moving ? Math.abs(Math.sin(phase)) * 0.05 : Math.sin(time * 2) * 0.012);
   };

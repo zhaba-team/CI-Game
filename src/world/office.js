@@ -1,5 +1,6 @@
-// Геометрия офиса: open-space, столовая, кабинет директора, серверная.
-// Окна — настоящие проёмы со стеклом; наружу смотрят северная и западная стены.
+// Геометрия офиса: open-space, столовая, кабинет директора, серверная и Игровая —
+// пристройка за западной стеной (вход из open-space на месте окна у столовой).
+// Окна — настоящие проёмы со стеклом; наружу смотрят северная и западная стены и окна Игровой.
 // Двери в кабинет, серверную и столовую закрываются по рабочим дням (setLocks), у южной стены — выход из офиса.
 // Возвращает сцену-группу, список коллайдеров (AABB в плоскости XZ),
 // объекты, загораживающие камеру, и именованные точки (spots) для NPC и маркеров.
@@ -8,6 +9,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { mat, glow, box, cyl, ico, group, textPlane } from './lowpoly.js';
 import { createWallSign } from './signs.js';
 import { buildExtinguisher } from './fire.js';
+import { buildGameRoom } from './gameRoom.js';
+import { addOfficeDecor } from './decor.js';
 
 const WALL_H = 4.2;
 const WALL_T = 0.3;
@@ -15,8 +18,12 @@ const DOOR_H = 2.7; // высота дверного проёма, выше — 
 const WIN_BOTTOM = 0.9;
 const WIN_H = 2.4;
 const WIN_W = 2.4;
+const DOOR_W = 2.4; // проём в Игровую — во всю ширину бывшего окна
 const NORTH_WINDOWS = [-13, -9, -5, -1, 3]; // x-центры окон на стене z = -12
-const WEST_WINDOWS = [-9, -5, -1, 3, 7];    // z-центры окон на стене x = -16
+const WEST_WINDOWS = [-9, -5, -1, 7];       // z-центры окон на стене x = -16; z = -1 и 7 смотрят в Игровую
+const WEST_DOORS = [3];                     // вход в Игровую на месте окна у столовой
+const GAME_NORTH_WINDOWS = [-20.5];         // x-центры окон северной стены Игровой (z = -3)
+const GAME_WEST_WINDOWS = [0, 6];           // z-центры окон западной стены Игровой (x = -25)
 const SHELF_X = 1.0;                        // книжный шкаф — в простенке между окнами x = -1 и x = 3
 const LAMP = 0.6;        // светящийся рассеиватель панели 60×60
 const LAMP_FRAME = 0.68;
@@ -28,6 +35,7 @@ export const ROOMS = {
   director: { x0: 5, x1: 16, z0: -12, z1: 0 },
   server: { x0: 5, x1: 16, z0: 0, z1: 12 },
   canteen: { x0: -16, x1: -7, z0: 4.5, z1: 12 }, // отгороженный юго-западный угол внутри контура open-space
+  gameRoom: { x0: -25, x1: -16, z0: -3, z1: 9 },  // пристройка за западной стеной, открыта всегда
 };
 const CANTEEN_DOOR_X = -11.25; // центр проёма в стене столовой z = 4.5
 
@@ -57,6 +65,8 @@ export function buildOffice() {
   floor(ROOMS.openSpace, '#d9c4a0');
   floor(ROOMS.director, '#8c3b3b');
   floor(ROOMS.server, '#3a4250');
+  // Пол Игровой заходит под её западную стену; восточный край встык с полом open-space (x = −16)
+  floor({ ...ROOMS.gameRoom, x0: ROOMS.gameRoom.x0 - WALL_T / 2 }, '#b9c4d6');
   // Плитка столовой лежит поверх пола и «паркета» open-space (они до y 0.005) — без z-fighting
   const canteenFloor = new THREE.Mesh(new THREE.PlaneGeometry(ROOMS.canteen.x1 - ROOMS.canteen.x0, ROOMS.canteen.z1 - ROOMS.canteen.z0), mat('#e8e2d4'));
   canteenFloor.rotation.x = -Math.PI / 2;
@@ -87,9 +97,9 @@ export function buildOffice() {
     occluders.push(m);
     solid(x0 - (x0 === x1 ? WALL_T / 2 : 0), z0 - (z0 === z1 ? WALL_T / 2 : 0), x1 + (x0 === x1 ? WALL_T / 2 : 0), z1 + (z0 === z1 ? WALL_T / 2 : 0));
   };
-  // Стена с оконными проёмами: один меш из кусков (1 draw call) и цельный коллайдер,
-  // так что окна остаются непроходимыми. axis 'x' — стена вдоль x на z = fixed, 'z' — вдоль z на x = fixed.
-  const windowWall = (axis, fixed, from, to, centers) => {
+  // Стена с оконными и дверными проёмами: один меш из кусков (1 draw call). Коллайдер — куски между
+  // дверями, так что окна остаются непроходимыми. axis 'x' — стена вдоль x на z = fixed, 'z' — вдоль z на x = fixed.
+  const windowWall = (axis, fixed, from, to, centers, doors = []) => {
     const pieces = [];
     // Кусок стены [a..b] вдоль оси, [y0..y1] по высоте
     const piece = (a, b, y0, y1) => {
@@ -101,26 +111,50 @@ export function buildOffice() {
       pieces.push(g);
     };
     const winTop = WIN_BOTTOM + WIN_H;
-    piece(from, to, 0, WIN_BOTTOM);
+    const openings = [
+      ...centers.map((c) => ({ c, w: WIN_W, door: false })),
+      ...doors.map((c) => ({ c, w: DOOR_W, door: true })),
+    ].sort((a, b) => a.c - b.c);
+    const doorways = openings.filter((o) => o.door);
+    // Полоса [y0..y1], прерванная проёмами list
+    const band = (list, y0, y1) => {
+      let edge = from;
+      for (const o of list) {
+        piece(edge, o.c - o.w / 2, y0, y1);
+        edge = o.c + o.w / 2;
+      }
+      piece(edge, to, y0, y1);
+    };
+    band(doorways, 0, WIN_BOTTOM);
+    band(openings, WIN_BOTTOM, winTop);
+    for (const d of doorways) piece(d.c - d.w / 2, d.c + d.w / 2, DOOR_H, winTop); // перемычка над дверью
     piece(from, to, winTop, WALL_H);
-    let edge = from;
-    for (const c of centers) {
-      piece(edge, c - WIN_W / 2, WIN_BOTTOM, winTop);
-      edge = c + WIN_W / 2;
-    }
-    piece(edge, to, WIN_BOTTOM, winTop);
     const m = new THREE.Mesh(mergeGeometries(pieces), wallMat);
     m.castShadow = m.receiveShadow = true;
     root.add(m);
     occluders.push(m);
-    if (axis === 'x') solid(from, fixed - WALL_T / 2, to, fixed + WALL_T / 2);
-    else solid(fixed - WALL_T / 2, from, fixed + WALL_T / 2, to);
+    const span = (a, b) => {
+      if (b - a <= 0) return;
+      if (axis === 'x') solid(a, fixed - WALL_T / 2, b, fixed + WALL_T / 2);
+      else solid(fixed - WALL_T / 2, a, fixed + WALL_T / 2, b);
+    };
+    let edge = from;
+    for (const d of doorways) {
+      span(edge, d.c - d.w / 2);
+      edge = d.c + d.w / 2;
+    }
+    span(edge, to);
   };
   // Внешние стены
   windowWall('x', -12, -16, 16, NORTH_WINDOWS);
   wallSegment(-16, 12, 16, 12);
-  windowWall('z', -16, -12, 12, WEST_WINDOWS);
+  windowWall('z', -16, -12, 12, WEST_WINDOWS, WEST_DOORS);
   wallSegment(16, -12, 16, 12);
+  // Стены Игровой: концы удлинены на полтолщины, чтобы в углах не было щелей
+  const game = ROOMS.gameRoom;
+  windowWall('x', game.z0, game.x0 - WALL_T / 2, game.x1 - WALL_T / 2, GAME_NORTH_WINDOWS);
+  windowWall('z', game.x0, game.z0 - WALL_T / 2, game.z1 + WALL_T / 2, GAME_WEST_WINDOWS);
+  wallSegment(game.x0 - WALL_T / 2, game.z1, game.x1 - WALL_T / 2, game.z1);
   // Перегородка между open-space и правым крылом с двумя дверями
   wallSegment(5, -12, 5, -7);
   wallSegment(5, -3.5, 5, 3.5);
@@ -158,6 +192,17 @@ export function buildOffice() {
     sign.rotation.y = Math.PI;
     root.add(sign);
     solidFrom(sign);
+  }
+
+  // Вход в Игровую: проём без двери, наличник по низу перемычки и порог, закрывающий шов полов.
+  // Вывеска — без solidFrom: её коллайдер по XZ перекрыл бы проход под ней
+  for (const z of WEST_DOORS) {
+    root.add(box(0.32, 0.12, DOOR_W, '#c9d1c9', -16, DOOR_H - 0.12, z));
+    root.add(box(WALL_T + 0.02, 0.01, DOOR_W, '#b9c4d6', -16, 0, z));
+    const sign = createWallSign('Игровая', { width: 1.9, height: 0.34, letterColor: '#7b4fd6', frameColor: '#7b4fd6' });
+    sign.position.set(-16 + WALL_T / 2, 3.25, z);
+    sign.rotation.y = Math.PI / 2; // лицом в open-space (+x)
+    root.add(sign);
   }
 
   // Закрываемые двери в проёмах шириной 3.5 м. Коллайдер и occluder не через solid():
@@ -216,6 +261,8 @@ export function buildOffice() {
   const windows = [
     ...NORTH_WINDOWS.map((x) => ({ x, z: -12, west: false })),
     ...WEST_WINDOWS.map((z) => ({ x: -16, z, west: true })),
+    ...GAME_NORTH_WINDOWS.map((x) => ({ x, z: game.z0, west: false })),
+    ...GAME_WEST_WINDOWS.map((z) => ({ x: game.x0, z, west: true })),
   ];
   // Бруски рамы: [смещение вдоль стены, смещение по y, длина вдоль стены, высота]
   const FRAME_DEPTH = 0.36;
@@ -262,6 +309,11 @@ export function buildOffice() {
   ceiling.rotation.x = Math.PI / 2;
   ceiling.position.set(0, WALL_H, 0);
   root.add(ceiling);
+  // Потолок Игровой встык с основным (по оси западной стены) — без перекрытия
+  const gameCeiling = new THREE.Mesh(new THREE.PlaneGeometry(game.x1 - game.x0, game.z1 - game.z0 + WALL_T), mat('#f3f4f0'));
+  gameCeiling.rotation.x = Math.PI / 2;
+  gameCeiling.position.set((game.x0 + game.x1) / 2 - WALL_T / 2, WALL_H, (game.z0 + game.z1) / 2);
+  root.add(gameCeiling);
 
   // Центры панелей: ровная сетка nx × nz внутри помещения
   const lampCenters = [];
@@ -278,8 +330,9 @@ export function buildOffice() {
   lampGrid(ROOMS.openSpace, 7, 8);
   lampGrid(ROOMS.director, 3, 3);
   lampGrid(ROOMS.server, 3, 3);
+  lampGrid(ROOMS.gameRoom, 3, 4);
   // Ряд панелей open-space на z = 4.5 пришёлся бы на стену столовой — убираем его над столовой
-  const onCanteenWall = ([x, z]) => x < ROOMS.canteen.x1 && Math.abs(z - ROOMS.canteen.z0) < LAMP_FRAME;
+  const onCanteenWall = ([x, z]) => x > ROOMS.canteen.x0 && x < ROOMS.canteen.x1 && Math.abs(z - ROOMS.canteen.z0) < LAMP_FRAME;
   for (let k = lampCenters.length - 1; k >= 0; k--) if (onCanteenWall(lampCenters[k])) lampCenters.splice(k, 1);
 
   // Все панели — два InstancedMesh (рамки и рассеиватели): +2 draw call вместо сотни
@@ -300,12 +353,14 @@ export function buildOffice() {
   lampMesh(new THREE.BoxGeometry(LAMP, 0.01, LAMP), glow('#f4f8ff', 1.1), WALL_H - LAMP_DROP - 0.005);
 
   // Один мягкий источник на помещение вместо света на каждую лампу:
-  // 74 PointLight убили бы FPS на мобильных. Серверную освещает serverLight из game.js.
+  // 83 PointLight убили бы FPS на мобильных. Серверную освещает serverLight из game.js.
   const openSpaceLight = new THREE.PointLight('#fff6e8', 19, 26, 1);
   openSpaceLight.position.set(-5.5, WALL_H - 0.5, 0);
   const directorLight = new THREE.PointLight('#ffe9c7', 14, 14, 1);
   directorLight.position.set(10.5, WALL_H - 0.5, -6);
-  root.add(openSpaceLight, directorLight);
+  const gameRoomLight = new THREE.PointLight('#ffeef6', 12, 14, 1);
+  gameRoomLight.position.set((game.x0 + game.x1) / 2, WALL_H - 0.5, (game.z0 + game.z1) / 2);
+  root.add(openSpaceLight, directorLight, gameRoomLight);
 
   // ---------- Мебель ----------
   const monitor = (x, z, rot, screenColor = '#2b5d8a') => {
@@ -335,7 +390,9 @@ export function buildOffice() {
   };
 
   // Рабочее место: стол + монитор + стул; facing — куда смотрит сидящий (+1 → +z)
+  const deskCenters = []; // для мелочей на столах (decor.js)
   const desk = (x, z, facing = 1, screenColor) => {
+    deskCenters.push({ x, z });
     const g = new THREE.Group();
     g.add(box(1.8, 0.06, 0.9, '#f4f1ea', 0, 0.72, 0));
     [[-0.82, -0.38], [0.82, -0.38], [-0.82, 0.38], [0.82, 0.38]].forEach(([lx, lz]) => g.add(box(0.06, 0.72, 0.06, '#7a7a7a', lx, 0, lz)));
@@ -363,6 +420,10 @@ export function buildOffice() {
     root.add(g);
     solid(x - 0.3 * s, z - 0.3 * s, x + 0.3 * s, z + 0.3 * s);
   };
+
+  // Помощники для модулей наполнения комнат (gameRoom.js, decor.js)
+  const ctx = { root, solid, solidFrom, occluders, spots, animated, plant };
+  const gameRoom = buildGameRoom(ctx, ROOMS.gameRoom);
 
   // Ряды столов в open-space
   const screens = ['#2b5d8a', '#3a7a4f', '#5b3a8a', '#2b5d8a', '#8a5b2b', '#2b6d7a'];
@@ -500,6 +561,8 @@ export function buildOffice() {
   root.add(exitSign);
   spots.exit = { x: 1, z: 10.9 };
 
+  addOfficeDecor(ctx, { desks: deskCenters });
+
   // ---------- Кабинет директора ----------
   const bossDesk = group(
     box(2.8, 0.08, 1.2, '#5a3b26', 0, 0.74, 0),
@@ -592,7 +655,15 @@ export function buildOffice() {
   spots.spawn = { x: -6, z: 7, face: Math.PI };
 
   // Описание внешнего контура для декорации снаружи (world/outdoor.js)
-  const outline = { x0: -16, x1: 16, z0: -12, z1: 12, wallT: WALL_T, winW: WIN_W, northWindows: NORTH_WINDOWS, westWindows: WEST_WINDOWS };
+  const outline = {
+    x0: -16, x1: 16, z0: -12, z1: 12, wallT: WALL_T, winW: WIN_W,
+    northWindows: NORTH_WINDOWS, westWindows: WEST_WINDOWS, westDoors: WEST_DOORS,
+    annexes: [{ ...ROOMS.gameRoom, northWindows: GAME_NORTH_WINDOWS, westWindows: GAME_WEST_WINDOWS }],
+  };
 
-  return { root, colliders, occluders, spots, animated, setServerFixed, setLocks, setExtinguisherOnWall, ceilingHeight: WALL_H, outline };
+  return {
+    root, colliders, occluders, spots, animated, setServerFixed, setLocks, setExtinguisherOnWall, ceilingHeight: WALL_H, outline,
+    seats: gameRoom.seats,
+    coffee: gameRoom.coffee,
+  };
 }

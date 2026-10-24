@@ -9,6 +9,7 @@ import { createPlayer } from './world/player.js';
 import { createNpc, createQuestMarker } from './world/npc.js';
 import { createFire, buildExtinguisher } from './world/fire.js';
 import { createInput } from './input.js';
+import { createProps } from './flow/props.js';
 import { createHud } from './ui/hud.js';
 import { h } from './ui/dom.js';
 import { openModal, closeModal, onModalChange, isModalOpen } from './ui/modal.js';
@@ -70,7 +71,8 @@ export function createGame({ onNewGame }) {
   sun.position.set(-8, 18, 6);
   sun.castShadow = true;
   sun.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);
-  Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 16, bottom: -16, near: 1, far: 50 });
+  // Рамка в осях света: x ≈ 0.6·X + 0.8·Z, y ≈ 0.7·X − 0.52·Z; bottom −23 захватывает Игровую (x −25..−16, z −3..9)
+  Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 18, bottom: -23, near: 1, far: 50 });
   sun.shadow.bias = -0.0008;
   scene.add(sun);
 
@@ -123,6 +125,16 @@ export function createGame({ onNewGame }) {
     });
   }));
   const heldExtinguisher = buildExtinguisher();
+  // Пуфики и кофемашина Игровой; руки свободны, пока нет предмета квеста (см. heldItem ниже)
+  const props = createProps({
+    seats: office.seats,
+    coffee: office.coffee,
+    coffeeSpot: office.spots.coffee,
+    player,
+    hud,
+    input,
+    handsFree: () => heldItem() === null,
+  });
   let fireBurning = false; // хоть одна стойка горит — свет серверной мерцает
   const exitMarker = createQuestMarker(office.spots.exit.x, office.spots.exit.z, { color: '#2e9e5b', beam: '#9be7b4' });
   scene.add(exitMarker.group);
@@ -195,7 +207,7 @@ export function createGame({ onNewGame }) {
       fireBurning ||= burns;
     }
     const held = heldItem() === 'extinguisher';
-    player.setHeld(held ? heldExtinguisher : null);
+    if (!props.holdsItem) player.setHeld(held ? heldExtinguisher : null); // стаканчик рафа не выбиваем из рук
     office.setExtinguisherOnWall(!held);
     const dayDone = isDayDone();
     exitMarker.group.visible = dayDone;
@@ -449,11 +461,13 @@ export function createGame({ onNewGame }) {
   const canExtinguish = (f) => currentStep(f.quest) === f.step;
 
   function interact() {
-    if (isModalOpen()) return;
+    if (isModalOpen() || props.busy) return;
+    if (player.seated) { props.interact(); return; }
     if (nearMarker) activateMarker(nearMarker);
     else if (nearFire) { if (canExtinguish(nearFire)) extinguish(nearFire); }
     else if (nearExit) showDaySummary();
     else if (nearNpc) talk(nearNpc);
+    else props.interact();
   }
   input.onAction(interact);
 
@@ -489,6 +503,14 @@ export function createGame({ onNewGame }) {
     nearExit = exitMarker.group.visible && Math.hypot(e.x - p.x, e.z - p.z) < MARKER_RADIUS;
 
     if (isModalOpen()) return;
+    const key = input.state.isTouch ? '' : 'E — ';
+    // Пока игрок пьёт кофе или сидит, говорят только предметы
+    if (props.busy || player.seated) {
+      const prop = props.check();
+      hud.setPrompt(prop ? `${key}${prop.text}` : null);
+      input.setActionVisible(Boolean(prop), prop?.icon);
+      return;
+    }
     // Автооткрытие мини-игры при подходе к маркеру — один раз, пока игрок не отойдёт.
     // Диалог с NPC открывается только по действию (E / 💬).
     if (nearMarker && lastMarkerAuto !== nearMarker.key) {
@@ -505,7 +527,6 @@ export function createGame({ onNewGame }) {
     }
     if (!nearExit) lastExitAuto = false;
 
-    const key = input.state.isTouch ? '' : 'E — ';
     if (nearMarker) {
       const { text, icon } = markerPrompt(nearMarker);
       hud.setPrompt(`${key}${text}`);
@@ -523,8 +544,9 @@ export function createGame({ onNewGame }) {
       hud.setPrompt(`${key}Поговорить: ${nearNpc.def.name}`);
       input.setActionVisible(true, '💬');
     } else {
-      hud.setPrompt(null);
-      input.setActionVisible(false);
+      const prop = props.check();
+      hud.setPrompt(prop ? `${prop.action ? key : ''}${prop.text}` : null);
+      input.setActionVisible(Boolean(prop?.action), prop?.icon);
     }
   }
 
@@ -545,7 +567,8 @@ export function createGame({ onNewGame }) {
   let running = false;
 
   function savePose() {
-    store.setPlayerPose({ x: player.position.x, z: player.position.z, heading: player.heading });
+    const rest = player.seated?.stand ?? player.position; // сидя сохраняем точку «встать», а не центр пуфика
+    store.setPlayerPose({ x: rest.x, z: rest.z, heading: player.heading });
     store.persist();
   }
   window.addEventListener('beforeunload', () => { if (running) savePose(); });
@@ -555,6 +578,7 @@ export function createGame({ onNewGame }) {
     const dt = Math.min(clock.getDelta(), 0.05);
     const time = clock.elapsedTime;
     input.update();
+    props.update(dt, time);
     player.update(dt, input, time);
     for (const npc of npcs) npc.update(dt, time, player.position);
     for (const m of markers) if (m.marker.group.visible) m.marker.update(time);
@@ -643,6 +667,10 @@ export function createGame({ onNewGame }) {
       completeDay: () => { dayQuests().forEach((q) => store.setQuestStatus(q.id, QuestStatus.DONE)); },
       endDay,
       summary: showDaySummary,
+      seats: office.seats,
+      sit: (k) => player.sit(office.seats[k]),
+      stand: () => player.stand(),
+      coffee: () => props.brewCoffee(),
     };
   }
 

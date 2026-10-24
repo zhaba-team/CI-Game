@@ -1,4 +1,5 @@
-// Улица за окнами: газон, Г-образная дорога с парковкой, low-poly деревья и машины.
+// Улица за окнами: газон, Г-образная дорога с парковкой, low-poly деревья, кусты и машины.
+// Западная улица отступает за пристройки офиса (outline.annexes), у их стен — деревья и кусты.
 // Всё через InstancedMesh, без теней и коллизий — только декорация.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -27,7 +28,7 @@ function boxAt(l, h, w, x, y) {
 
 export function buildOutdoor(outline) {
   const root = new THREE.Group();
-  const stats = { trees: 0, cars: 0, drawCalls: 0 };
+  const stats = { trees: 0, bushes: 0, cars: 0, drawCalls: 0 };
   const rng = createRng(20261024);
   const range = (a, b) => a + rng() * (b - a);
   const pick = (list) => list[Math.floor(rng() * list.length)];
@@ -60,9 +61,11 @@ export function buildOutdoor(outline) {
     scale.set(sx, sy, sz),
   );
 
-  // Края улицы считаем от внешних граней стен
-  const N = outline.z0 - outline.wallT / 2; // -12.15
-  const W = outline.x0 - outline.wallT / 2; // -16.15
+  // Края улицы считаем от внешних граней стен; западная улица — от самой западной пристройки
+  const half = outline.wallT / 2;
+  const N = outline.z0 - half;      // -12.15
+  const officeW = outline.x0 - half; // -16.15 — стена офиса
+  const W = Math.min(outline.x0, ...outline.annexes.map((a) => a.x0)) - half; // -25.15
   // Север: тротуар, дорога (у тротуара — парковочная полоса), дальний тротуар
   const nWalk = N - 2.85;     // -15
   const nRoad = nWalk - 2;    // -17
@@ -70,11 +73,11 @@ export function buildOutdoor(outline) {
   const nFar = nRoad - 8;     // -25
   const nEnd = nFar - 2;      // -27
   // Запад: то же зеркально по x
-  const wWalk = W - 2.85;     // -19
-  const wRoad = wWalk - 2;    // -21
-  const wPark = wRoad - 2.5;  // -23.5
-  const wFar = wRoad - 8;     // -29
-  const wEnd = wFar - 2;      // -31
+  const wWalk = W - 2.85;     // -28
+  const wRoad = wWalk - 2;    // -30
+  const wPark = wRoad - 2.5;  // -32.5
+  const wFar = wRoad - 8;     // -38
+  const wEnd = wFar - 2;      // -40
   const FAR = 100;
 
   // ---------- Земля и дороги ----------
@@ -99,14 +102,14 @@ export function buildOutdoor(outline) {
   // Разметка: пунктир по оси проезжей части и линии парковочных мест
   const lines = [];
   const nAxis = (nPark + nFar) / 2; // -22.25
-  const wAxis = (wPark + wFar) / 2; // -26.25
+  const wAxis = (wPark + wFar) / 2; // -35.25
   for (let x = wRoad + 2; x < FAR; x += 4) lines.push(compose(x, 0.02, nAxis, 0, 2, 1, 0.12));
   for (let z = nRoad + 2; z < FAR; z += 4) lines.push(compose(wAxis, 0.02, z, 0, 0.12, 1, 2));
   const nSlotZ = (nRoad + nPark) / 2; // -18.25
-  const wSlotX = (wRoad + wPark) / 2; // -22.25
+  const wSlotX = (wRoad + wPark) / 2; // -31.25
   const nSlots = [];
   const wSlots = [];
-  for (let x = -18; x <= 40; x += SLOT) nSlots.push(x);
+  for (let x = wRoad + 4; x <= 40; x += SLOT) nSlots.push(x); // не начинаем внутри перекрёстка
   for (let z = -15; z <= 40; z += SLOT) wSlots.push(z);
   for (const x of nSlots) lines.push(compose(x - SLOT / 2, 0.02, nSlotZ, 0, 0.12, 1, 2.5));
   for (const z of wSlots) lines.push(compose(wSlotX, 0.02, z - SLOT / 2, 0, 2.5, 1, 0.12));
@@ -126,13 +129,48 @@ export function buildOutdoor(outline) {
     stats.trees++;
   };
 
+  // Точка внутри пристройки, расширенной на pad, — дерево или куст там ставить нельзя
+  const nearAnnex = (x, z, pad) => outline.annexes.some((a) => x > a.x0 - pad && x < a.x1 + pad && z > a.z0 - pad && z < a.z1 + pad);
+  const gaps = (centers) => [...new Set(centers.flatMap((c) => [c - 2, c + 2]))];
+
   // Газон у стен: в простенках между окнами и вдоль кабинета директора; масштаб скромнее — крона не задевает стену
   const nearScale = () => range(0.8, 1.05);
-  const northGaps = [...new Set(outline.northWindows.flatMap((c) => [c - 2, c + 2]))];
-  for (const x of [...northGaps, 8.5, 12, 15.5]) addTree('leafy', x, N - 1.45 + range(-0.3, 0.3), nearScale());
-  const westGaps = [...new Set(outline.westWindows.flatMap((c) => [c - 2, c + 2]))];
-  for (const z of westGaps) addTree('leafy', W - 1.45 + range(-0.3, 0.3), z, nearScale());
-  addTree('spruce', W - 1.45, N - 1.45, 1);
+  for (const x of [...gaps(outline.northWindows), 8.5, 12, 15.5]) addTree('leafy', x, N - 1.45 + range(-0.3, 0.3), nearScale());
+  for (const z of gaps([...outline.westWindows, ...outline.westDoors])) {
+    const x = officeW - 1.45 + range(-0.3, 0.3);
+    if (!nearAnnex(x, z, 1.5)) addTree('leafy', x, z, nearScale());
+  }
+  addTree('spruce', officeW - 1.45, N - 1.45, 1);
+  // У стен пристроек — в простенках их окон, ель — в северо-западном углу
+  for (const a of outline.annexes) {
+    const aw = a.x0 - half - 1.45;
+    const an = a.z0 - half - 1.45;
+    for (const z of gaps(a.westWindows)) addTree('leafy', aw + range(-0.2, 0.2), z, nearScale());
+    for (const x of gaps(a.northWindows)) addTree('leafy', x, an + range(-0.2, 0.2), nearScale());
+    addTree('spruce', aw, an, 1);
+  }
+  // Газон между офисом и западной улицей: фиксированные точки, чтобы стволы не сближались
+  const LAWN_TREES = [[-21, -8.8], [-24.8, -9.6], [-22.6, -12.6], [-26.6, -12.8], [-27, -7.6], [-23.5, 12.2], [-19.2, 11.6]];
+  for (const [x, z] of LAWN_TREES) addTree('leafy', x, z, range(0.9, 1.15));
+
+  // ---------- Кусты ----------
+  // Ниже подоконника (0.9 м): под окнами пристроек, вдоль глухих стен и у западной стены офиса
+  const bushes = { matrices: [], colors: [] };
+  const addBush = (x, z) => {
+    bushes.matrices.push(compose(x, 0, z, rng() * Math.PI * 2, range(0.8, 1.0)));
+    bushes.colors.push(pick(LEAF_COLORS));
+    stats.bushes++;
+  };
+  for (const a of outline.annexes) {
+    for (const c of a.westWindows) for (const dz of [-0.8, 0.8]) addBush(a.x0 - half - 0.7, c + dz);
+    for (const c of a.northWindows) for (const dx of [-0.8, 0.8]) addBush(c + dx, a.z0 - half - 0.7);
+    for (let x = a.x0 + 0.8; x < a.x1 - 0.5; x += 1.6) addBush(x, a.z1 + half + 0.7);
+  }
+  for (const c of outline.westWindows) {
+    for (const dz of [-0.8, 0.8]) {
+      if (!nearAnnex(officeW - 0.7, c + dz, 0.8)) addBush(officeW - 0.7, c + dz);
+    }
+  }
 
   // Лесополосы за дальними тротуарами: сетка с джиттером, деревья не заходят на тротуар
   const belt = (x0, x1, z0, z1, keep) => {
@@ -147,8 +185,8 @@ export function buildOutdoor(outline) {
       }
     }
   };
-  belt(-60, 60, -60, nEnd - 2, (x, z) => z < nEnd - 2);
-  belt(-60, wEnd - 2, nEnd - 2, 60, (x, z) => x < wEnd - 2 && z > nEnd - 2);
+  belt(-70, 60, -60, nEnd - 2, (x, z) => z < nEnd - 2);
+  belt(-70, wEnd - 2, nEnd - 2, 60, (x, z) => x < wEnd - 2 && z > nEnd - 2);
 
   // Ствол и крона — два InstancedMesh с одной матрицей; основание геометрий в y = 0
   const crownMat = mat('#ffffff', { roughness: 0.9 });
@@ -157,6 +195,7 @@ export function buildOutdoor(outline) {
   instanced(new THREE.IcosahedronGeometry(1.2, 0).scale(1, 1.15, 1).translate(0, 1.6 + 1.1, 0), crownMat, leafy.matrices, leafy.colors);
   instanced(new THREE.CylinderGeometry(0.12, 0.16, 0.8, 5).translate(0, 0.4, 0), trunkMat, spruce.matrices);
   instanced(new THREE.ConeGeometry(1.0, 2.6, 7).translate(0, 0.8 + 1.3, 0), crownMat, spruce.matrices, spruce.colors);
+  instanced(new THREE.IcosahedronGeometry(0.55, 0).scale(1, 0.7, 1).translate(0, 0.35, 0), crownMat, bushes.matrices, bushes.colors);
 
   // ---------- Машины ----------
   const cars = CAR_MODELS.map(() => ({ matrices: [], colors: [] }));

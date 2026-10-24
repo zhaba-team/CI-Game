@@ -1,5 +1,6 @@
 // Игрок: движение относительно камеры, столкновения со стенами и мебелью,
 // камера от третьего лица за спиной персонажа, не выше потолка.
+// Может сидеть (sit / stand) и замирать на время анимаций (setFrozen) — тогда движение заблокировано.
 import * as THREE from 'three';
 import { createCharacter } from './characters.js';
 
@@ -68,8 +69,14 @@ export function createPlayer(scene, camera, { colliders, occluders, ceilingHeigh
   const side = new THREE.Vector3();
   const origin = new THREE.Vector3();
   const camMaxY = ceilingHeight - CEIL_CLEARANCE;
+  let seat = null;     // { x, z, face, stand: { x, z } } — на чём сидит игрок
+  let frozen = false;  // идёт анимация (например, кофе) — ходить нельзя
 
   function place(x, z, face = 0) {
+    seat = null;
+    frozen = false;
+    model.userData.setPose('stand');
+    model.userData.setGesture(null);
     pos.set(x, 0, z);
     heading = face;
     yaw = face + Math.PI;
@@ -116,7 +123,8 @@ export function createPlayer(scene, camera, { colliders, occluders, ceilingHeigh
     pitch = THREE.MathUtils.clamp(pitch + look.y * sens * 0.6, PITCH_MIN, PITCH_MAX);
 
     const { move, run } = input.state;
-    const amount = Math.hypot(move.x, move.y);
+    // Сидя или во время анимации стоим на месте, камера и анимация тела работают
+    const amount = seat || frozen ? 0 : Math.hypot(move.x, move.y);
     // Направления относительно камеры
     const fx = -Math.sin(yaw);
     const fz = -Math.cos(yaw);
@@ -144,7 +152,7 @@ export function createPlayer(scene, camera, { colliders, occluders, ceilingHeigh
         yaw += cd * (1 - Math.exp(-dt * 1.6 * move.y));
       }
     }
-    resolveCollisions(pos, colliders);
+    if (!seat) resolveCollisions(pos, colliders); // сиденье само в коллайдере — не выталкиваем
 
     model.position.copy(pos);
     model.rotation.y = heading;
@@ -160,9 +168,33 @@ export function createPlayer(scene, camera, { colliders, occluders, ceilingHeigh
     if (held) held.removeFromParent();
     held = object;
     if (!held) return;
-    held.position.set(0, -0.71 - 0.5, 0.06);
+    held.position.set(0, -0.71 - (held.userData.hang ?? 0.5), 0.06); // hang — насколько предмет свисает от кисти
     held.rotation.set(0, 0, 0);
     model.userData.parts.armR.add(held);
+  }
+
+  // Сесть: тело в центре сиденья лицом по seat.face, камера — за спиной
+  function sit(target) {
+    seat = target;
+    pos.set(seat.x, 0, seat.z);
+    heading = seat.face;
+    yaw = seat.face + Math.PI;
+    speed = 0;
+    model.userData.setPose('lounge');
+  }
+
+  // Встать в точку seat.stand рядом с сиденьем
+  function stand() {
+    if (!seat) return;
+    pos.set(seat.stand.x, 0, seat.stand.z);
+    seat = null;
+    model.userData.setPose('stand');
+    resolveCollisions(pos, colliders);
+  }
+
+  // Повернуться лицом к точке (x, z)
+  function face(x, z) {
+    heading = Math.atan2(x - pos.x, z - pos.z);
   }
 
   return {
@@ -171,6 +203,11 @@ export function createPlayer(scene, camera, { colliders, occluders, ceilingHeigh
     place,
     update,
     setHeld,
+    sit,
+    stand,
+    face,
+    setFrozen(value) { frozen = value; },
+    get seated() { return seat; },
     get heading() { return heading; },
   };
 }
