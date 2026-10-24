@@ -3,6 +3,7 @@ import { createGame } from './game.js';
 import { h } from './ui/dom.js';
 import * as store from './state.js';
 import { QUESTS } from './quests/quests.js';
+import { DAYS, questsOfDay } from './quests/days.js';
 
 const screen = document.getElementById('start-screen');
 const content = document.getElementById('start-content');
@@ -55,15 +56,20 @@ function nicknameForm() {
 function showStart() {
   screen.classList.remove('hidden');
   const saved = store.loadSave();
-  if (!saved) {
+  // Сейв с днём, которого больше нет в DAYS (данные дней изменились), — как пустой
+  if (!saved || !DAYS[saved.day]) {
     content.replaceChildren(nicknameForm());
     return;
   }
-  const done = QUESTS.filter((q) => saved.quests[q.id] === store.QuestStatus.DONE).length;
+  const dayQuests = questsOfDay(saved.day, QUESTS);
+  const done = dayQuests.filter((q) => saved.quests[q.id] === store.QuestStatus.DONE).length;
+  const progress = saved.finished
+    ? 'Стажировка пройдена 🏆'
+    : `${DAYS[saved.day].title} · заданий дня выполнено ${done} из ${dayQuests.length}`;
   content.replaceChildren(
     h('div', { class: 'resume' },
       h('p', {}, 'С возвращением, ', h('b', {}, saved.name), '!'),
-      h('p', { class: 'muted' }, `Выполнено заданий: ${done} из ${QUESTS.length}`),
+      h('p', { class: 'muted' }, progress),
       h('button', { class: 'btn primary big', onclick: () => { store.resume(saved); begin(false); } }, 'Продолжить'),
       h('button', { class: 'btn ghost', onclick: () => { store.clearSave(); content.replaceChildren(nicknameForm()); } }, 'Новая игра'),
     ),

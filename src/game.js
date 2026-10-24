@@ -1,4 +1,5 @@
-// Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов.
+// Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов,
+// рабочие дни (интро, итоги, переход к следующему дню) и финал.
 import * as THREE from 'three';
 import { buildOffice } from './world/office.js';
 import { buildSky } from './world/sky.js';
@@ -11,6 +12,7 @@ import { h } from './ui/dom.js';
 import { openModal, closeModal, onModalChange, isModalOpen } from './ui/modal.js';
 import { NPCS } from './quests/npcs.js';
 import { QUESTS, fillTemplate } from './quests/quests.js';
+import { DAYS, questsOfDay, dayOfQuest, lockedRooms } from './quests/days.js';
 import { getMinigame } from './minigames/index.js';
 import * as store from './state.js';
 
@@ -19,6 +21,10 @@ const TALK_RADIUS = 2.0;
 const MARKER_RADIUS = 0.8;
 
 export function createGame({ onNewGame }) {
+  for (const q of QUESTS) {
+    if (dayOfQuest(q.id) === -1) throw new Error(`Квест «${q.id}» не привязан ни к одному дню (src/quests/days.js)`);
+  }
+
   const canvas = document.getElementById('game');
   const isMobile = window.matchMedia('(pointer: coarse)').matches;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile || window.devicePixelRatio < 2 });
@@ -59,11 +65,12 @@ export function createGame({ onNewGame }) {
   const hud = createHud();
   const player = createPlayer(scene, camera, office);
 
+  // Коллайдер NPC есть, только пока NPC в офисе (см. npcArrived в refresh)
   const npcs = NPCS.map((def) => {
     const npc = createNpc(def, office.spots[def.spot]);
     scene.add(npc.group);
     const { x, z } = npc.position;
-    office.colliders.push({ x0: x - 0.3, z0: z - 0.3, x1: x + 0.3, z1: z + 0.3 });
+    npc.collider = { x0: x - 0.3, z0: z - 0.3, x1: x + 0.3, z1: z + 0.3 };
     return npc;
   });
 
@@ -73,21 +80,44 @@ export function createGame({ onNewGame }) {
     scene.add(marker.group);
     return [q.id, marker];
   }));
+  const exitMarker = createQuestMarker(office.spots.exit.x, office.spots.exit.z, { color: '#2e9e5b', beam: '#9be7b4' });
+  scene.add(exitMarker.group);
 
   const name = () => store.getState().name;
   const t = (text) => fillTemplate(text, name());
 
+  // ---------- Рабочие дни ----------
+  const day = () => DAYS[store.currentDay()];
+  const dayQuests = () => questsOfDay(store.currentDay(), QUESTS);
+  const isDayDone = () => dayQuests().every((q) => store.questStatus(q.id) === QuestStatus.DONE);
+  // NPC приходит в офис в день своего квеста; NPC без квеста в офисе всегда
+  const npcArrived = (npc) => {
+    const quest = QUESTS.find((q) => q.npc === npc.def.id);
+    return !quest || dayOfQuest(quest.id) <= store.currentDay();
+  };
+
   // ---------- Синхронизация мира с состоянием ----------
   function refresh() {
+    office.setLocks(lockedRooms(store.currentDay()));
     for (const npc of npcs) {
       const quest = QUESTS.find((q) => q.npc === npc.def.id);
       npc.setStatus(quest ? store.questStatus(quest.id) : null);
+      const arrived = npcArrived(npc);
+      npc.group.visible = arrived;
+      const k = office.colliders.indexOf(npc.collider);
+      if (arrived && k === -1) office.colliders.push(npc.collider);
+      if (!arrived && k !== -1) office.colliders.splice(k, 1);
     }
     for (const q of QUESTS) markers.get(q.id).group.visible = store.questStatus(q.id) === QuestStatus.ACTIVE;
+    const dayDone = isDayDone();
+    exitMarker.group.visible = dayDone;
     const serverFixed = store.questStatus('pipeline') === QuestStatus.DONE;
     office.setServerFixed(serverFixed);
     serverLight.color.set(serverFixed ? '#6bc5ff' : '#ff6b6b');
-    hud.renderJournal(QUESTS, NPCS, store.questStatus);
+    hud.renderJournal(dayQuests(), NPCS, store.questStatus, {
+      title: day().title,
+      doneHint: dayDone ? 'День завершён — выход у ресепшена 🚪' : null,
+    });
   }
   store.onChange(refresh);
 
@@ -161,7 +191,7 @@ export function createGame({ onNewGame }) {
   }
 
   function showLesson(quest, npc) {
-    const allDone = QUESTS.every((q) => store.questStatus(q.id) === QuestStatus.DONE);
+    const dayDone = isDayDone();
     openModal({
       title: 'Квест выполнен! 🎉',
       subtitle: quest.title,
@@ -171,18 +201,77 @@ export function createGame({ onNewGame }) {
         h('p', { class: 'muted' }, `${npc.name} говорит спасибо! Можно подойти ещё раз и поболтать.`),
       ),
       actions: [{
-        label: allDone ? 'Дальше →' : 'Супер!',
+        label: dayDone ? 'Итоги дня →' : 'Супер!',
         primary: true,
-        onClick: () => { closeModal(); if (allDone && !store.getState().finaleShown) showFinale(); },
+        onClick: () => { if (dayDone) showDaySummary(); else closeModal(); },
       }],
     });
   }
 
+  // ---------- Интро, итоги и смена дня ----------
+  function showDayIntro() {
+    const first = store.currentDay() === 0;
+    const touch = input.state.isTouch;
+    openModal({
+      title: day().title,
+      subtitle: day().intro.subtitle,
+      body: h('div', { class: 'lesson' },
+        day().intro.lines.map((line) => h('p', {}, t(line))),
+        first
+          ? h('div', { class: 'controls' },
+            touch
+              ? [h('div', {}, '🕹️ Стик слева — ходить'), h('div', {}, '👆 Проведи по экрану — повернуть камеру'), h('div', {}, '💬 Кнопка справа — говорить')]
+              : [h('div', {}, h('kbd', {}, 'W A S D'), ' — ходить, ', h('kbd', {}, 'Shift'), ' — бежать'), h('div', {}, '🖱️ Зажми мышь и веди — повернуть камеру'), h('div', {}, h('kbd', {}, 'E'), ' — поговорить / сесть за компьютер')],
+          )
+          : null,
+      ),
+      actions: [{ label: 'Поехали!', primary: true }],
+      // Интро считается прочитанным при любом закрытии, в том числе крестиком
+      onClose: () => store.setDayIntroShown(),
+    });
+  }
+
+  function showDaySummary() {
+    const quests = dayQuests();
+    openModal({
+      title: `${day().title} — день завершён! 🎉`,
+      subtitle: `Итоги рабочего дня, ${name()}`,
+      body: h('div', { class: 'lesson day-summary' },
+        h('h3', {}, '💡 Что ты узнал о профессии'),
+        h('ul', { class: 'roles' }, quests.map((q) => h('li', {}, h('b', {}, q.lesson.title), ` — ${q.lesson.text}`))),
+        h('p', {}, day().summary.insight),
+        h('h3', {}, '✅ Что ты сделал'),
+        h('ul', { class: 'done-list' }, quests.map((q) => {
+          const npc = NPCS.find((n) => n.id === q.npc);
+          return h('li', {}, q.title, h('span', { class: 'muted' }, ` (${npc.name}, ${npc.role})`));
+        })),
+      ),
+      actions: [
+        { label: 'Продолжить гулять по офису', onClick: () => { closeModal(); hud.toast('Когда захочешь закончить день — встань на зелёный маркер у выхода.'); } },
+        { label: 'Закончить рабочий день', primary: true, onClick: endDay },
+      ],
+    });
+  }
+
+  function endDay() {
+    if (store.currentDay() === DAYS.length - 1) {
+      store.setFinished();
+      showFinale();
+      return;
+    }
+    store.advanceDay(); // onChange → refresh: двери, NPC и журнал нового дня
+    const spawn = office.spots.spawn;
+    player.place(spawn.x, spawn.z, spawn.face);
+    lastMarkerAuto = null;
+    lastExitAuto = false;
+    savePose();
+    showDayIntro();
+  }
+
   function showFinale() {
-    store.setFinaleShown();
     openModal({
       title: `Поздравляем, ${name()}! 🏆`,
-      subtitle: 'Первая неделя стажировки в «жыбий рыр» пройдена',
+      subtitle: 'Три дня стажировки в «жыбий рыр» позади',
       body: h('div', { class: 'lesson' },
         h('p', {}, 'Ты помог всей команде и попробовал себя в разных ролях IT-компании:'),
         h('ul', { class: 'roles' }, QUESTS.map((q) => {
@@ -201,11 +290,14 @@ export function createGame({ onNewGame }) {
   // ---------- Взаимодействие ----------
   let nearNpc = null;
   let nearMarker = null;
+  let nearExit = false;
   let lastMarkerAuto = null;
+  let lastExitAuto = false;
 
   function interact() {
     if (isModalOpen()) return;
     if (nearMarker) openMinigame(nearMarker);
+    else if (nearExit) showDaySummary();
     else if (nearNpc) talk(nearNpc);
   }
   input.onAction(interact);
@@ -215,6 +307,7 @@ export function createGame({ onNewGame }) {
     nearNpc = null;
     let best = TALK_RADIUS;
     for (const npc of npcs) {
+      if (!npc.group.visible) continue;
       const d = Math.hypot(npc.position.x - p.x, npc.position.z - p.z);
       if (d < best) { best = d; nearNpc = npc; }
     }
@@ -224,6 +317,8 @@ export function createGame({ onNewGame }) {
       const m = markers.get(q.id).position;
       if (Math.hypot(m.x - p.x, m.z - p.z) < MARKER_RADIUS) { nearMarker = q; break; }
     }
+    const e = exitMarker.position;
+    nearExit = exitMarker.group.visible && Math.hypot(e.x - p.x, e.z - p.z) < MARKER_RADIUS;
 
     if (isModalOpen()) return;
     // Автооткрытие мини-игры при подходе к маркеру — один раз, пока игрок не отойдёт.
@@ -234,11 +329,21 @@ export function createGame({ onNewGame }) {
       return;
     }
     if (!nearMarker) lastMarkerAuto = null;
+    // Итоги дня на маркере выхода — тоже один раз, пока игрок не сойдёт с маркера
+    if (!nearMarker && nearExit && !lastExitAuto) {
+      lastExitAuto = true;
+      showDaySummary();
+      return;
+    }
+    if (!nearExit) lastExitAuto = false;
 
     const key = input.state.isTouch ? '' : 'E — ';
     if (nearMarker) {
       hud.setPrompt(`${key}Сесть за компьютер`);
       input.setActionVisible(true, '💻');
+    } else if (nearExit) {
+      hud.setPrompt(`${key}Завершить рабочий день`);
+      input.setActionVisible(true, '🚪');
     } else if (nearNpc) {
       hud.setPrompt(`${key}Поговорить: ${nearNpc.def.name}`);
       input.setActionVisible(true, '💬');
@@ -278,6 +383,7 @@ export function createGame({ onNewGame }) {
     player.update(dt, input, time);
     for (const npc of npcs) npc.update(dt, time, player.position);
     for (const m of markers.values()) if (m.group.visible) m.update(time);
+    if (exitMarker.group.visible) exitMarker.update(time);
     for (const fn of office.animated) fn(time);
     sky.update(time);
     if (running) checkInteractions();
@@ -287,27 +393,12 @@ export function createGame({ onNewGame }) {
   }
   renderer.setAnimationLoop(frame);
 
-  function showWelcome() {
-    openModal({
-      title: `Добро пожаловать, ${name()}!`,
-      subtitle: 'IT-компания «жыбий рыр», первый день стажировки',
-      body: h('div', { class: 'lesson' },
-        h('p', {}, `Ты — новый стажёр-программист. Познакомься с командой: у коллег с жёлтым знаком «!» над головой есть для тебя задания. Подойди к коллеге и ${input.state.isTouch ? 'нажми 💬' : 'нажми E'}, чтобы поговорить. Выполнять задания можно в любом порядке.`),
-        h('div', { class: 'controls' },
-          input.state.isTouch
-            ? [h('div', {}, '🕹️ Стик слева — ходить'), h('div', {}, '👆 Проведи по экрану — повернуть камеру'), h('div', {}, '💬 Кнопка справа — говорить')]
-            : [h('div', {}, h('kbd', {}, 'W A S D'), ' — ходить, ', h('kbd', {}, 'Shift'), ' — бежать'), h('div', {}, '🖱️ Зажми мышь и веди — повернуть камеру'), h('div', {}, h('kbd', {}, 'E'), ' — поговорить / сесть за компьютер')],
-        ),
-      ),
-      actions: [{ label: 'Поехали!', primary: true }],
-    });
-  }
-
   function showMenu() {
-    const done = QUESTS.filter((q) => store.questStatus(q.id) === QuestStatus.DONE).length;
+    const quests = dayQuests();
+    const done = quests.filter((q) => store.questStatus(q.id) === QuestStatus.DONE).length;
     openModal({
       title: 'Меню',
-      subtitle: `${name()} · выполнено ${done} из ${QUESTS.length}`,
+      subtitle: `${name()} · ${day().title} · выполнено ${done} из ${quests.length}`,
       body: h('div', { class: 'lesson' },
         h('p', {}, 'Прогресс сохраняется автоматически в этом браузере.'),
         h('div', { class: 'controls' },
@@ -348,6 +439,10 @@ export function createGame({ onNewGame }) {
       outdoor: outdoor.stats,
       talk: (npcId) => talk(npcs.find((n) => n.def.id === npcId)),
       minigame: (questId) => openMinigame(QUESTS.find((q) => q.id === questId)),
+      day: () => store.currentDay(),
+      completeDay: () => { dayQuests().forEach((q) => store.setQuestStatus(q.id, QuestStatus.DONE)); },
+      endDay,
+      summary: showDaySummary,
     };
   }
 
@@ -358,12 +453,13 @@ export function createGame({ onNewGame }) {
       if (s.player && !fresh) player.place(s.player.x, s.player.z, s.player.heading);
       else player.place(spawn.x, spawn.z, spawn.face);
       lastMarkerAuto = null;
+      lastExitAuto = false;
       refresh();
       hud.show();
       running = true;
       input.setEnabled(true);
-      if (fresh) showWelcome();
-      // Если игрок сохранился, стоя на маркере, не открываем мини-игру сразу
+      if (!s.dayIntroShown) showDayIntro();
+      // Если игрок сохранился, стоя на маркере, не открываем мини-игру или итоги сразу
       checkInteractionsSilently();
     },
     stop() {
@@ -382,5 +478,7 @@ export function createGame({ onNewGame }) {
       const m = markers.get(q.id).position;
       if (store.questStatus(q.id) === QuestStatus.ACTIVE && Math.hypot(m.x - p.x, m.z - p.z) < MARKER_RADIUS) lastMarkerAuto = q.id;
     }
+    const e = exitMarker.position;
+    if (exitMarker.group.visible && Math.hypot(e.x - p.x, e.z - p.z) < MARKER_RADIUS) lastExitAuto = true;
   }
 }

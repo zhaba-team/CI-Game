@@ -19,18 +19,20 @@ export function createHud() {
     show() { hud.classList.remove('hidden'); },
     hide() { hud.classList.add('hidden'); },
 
-    renderJournal(quests, npcs, statusOf) {
+    // title — заголовок журнала (название дня), doneHint — подсказка последней строкой, когда день завершён
+    renderJournal(quests, npcs, statusOf, { title, doneHint } = {}) {
       const done = quests.filter((q) => statusOf(q.id) === QuestStatus.DONE).length;
       const header = h('button', {
         class: 'journal-head',
         onclick: () => { collapsed = !collapsed; journal.classList.toggle('collapsed', collapsed); },
-      }, h('b', {}, '📋 Задания'), h('span', { class: 'progress' }, `${done}/${quests.length}`));
+      }, h('b', {}, `📋 ${title ?? 'Задания'}`), h('span', { class: 'progress' }, `${done}/${quests.length}`));
       const items = quests.map((q) => {
         const st = statusOf(q.id);
         const npc = npcs.find((n) => n.id === q.npc);
         const hint = st === QuestStatus.AVAILABLE ? `Поговори: ${npc.name}` : st === QuestStatus.ACTIVE ? `Иди: ${q.where}` : 'Выполнено';
         return h('li', { class: st }, h('span', { class: 'qi' }, STATUS_ICON[st]), h('div', {}, h('div', { class: 'qt' }, q.title), h('div', { class: 'qh' }, hint)));
       });
+      if (doneHint) items.push(h('li', { class: 'exit-hint' }, doneHint));
       const bar = h('div', { class: 'bar' }, h('div', { style: { width: `${(done / quests.length) * 100}%` } }));
       journal.replaceChildren(header, bar, h('ul', {}, items));
       journal.classList.toggle('collapsed', collapsed);

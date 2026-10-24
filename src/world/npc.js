@@ -1,4 +1,4 @@
-// NPC с табличкой и значком над головой + маркеры на полу для активных квестов.
+// NPC с табличкой и значком над головой + маркеры на полу (активные квесты, выход из офиса).
 import * as THREE from 'three';
 import { createCharacter } from './characters.js';
 import { mat, glow, textSprite } from './lowpoly.js';
@@ -57,20 +57,20 @@ export function createNpc(def, spot) {
   };
 }
 
-export function createQuestMarker(x, z) {
+export function createQuestMarker(x, z, { color = '#ffc93c', beam: beamColor = '#ffe08a' } = {}) {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.62, 6), mat('#ffc93c', {
-    emissive: '#ffc93c', emissiveIntensity: 1, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.62, 6), mat(color, {
+    emissive: color, emissiveIntensity: 1, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
   }));
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 0.02;
   const beam = new THREE.Mesh(
     new THREE.CylinderGeometry(0.5, 0.5, 2.6, 6, 1, true),
-    new THREE.MeshBasicMaterial({ color: '#ffe08a', transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ color: beamColor, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false }),
   );
   beam.position.y = 1.3;
-  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.4, 4), glow('#ffc93c', 0.9));
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.4, 4), glow(color, 0.9));
   arrow.rotation.x = Math.PI;
   arrow.position.y = 2.3;
   g.add(ring, beam, arrow);

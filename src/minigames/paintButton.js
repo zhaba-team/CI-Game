@@ -39,7 +39,7 @@ export default {
       if (okColor && okRadius) {
         done = true;
         feedback.className = 'feedback ok';
-        feedback.textContent = '🎉 Точно как на макете! Аня будет счастлива.';
+        feedback.textContent = '🎉 Точно как на макете! Клиент будет счастлив.';
         buy.classList.add('pop');
         setTimeout(complete, 900);
         return;
@@ -51,7 +51,7 @@ export default {
     });
 
     const mockup = h('div', { class: 'mockup' },
-      h('div', { class: 'mockup-label' }, 'Макет от Ани'),
+      h('div', { class: 'mockup-label' }, 'Макет дизайнера'),
       h('div', { class: 'mockup-btn', style: { background: TARGET.color, borderRadius: `${TARGET.radius}px` } }, 'Купить'),
       h('div', { class: 'mockup-spec' }, `цвет: ${TARGET.color}`, h('br'), `скругление: ${TARGET.radius}px`),
     );

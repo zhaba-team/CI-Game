@@ -1,5 +1,6 @@
 // Геометрия офиса: open-space, кабинет директора, серверная.
 // Окна — настоящие проёмы со стеклом; наружу смотрят северная и западная стены.
+// Двери в кабинет и серверную закрываются по рабочим дням (setLocks), у южной стены — выход из офиса.
 // Возвращает сцену-группу, список коллайдеров (AABB в плоскости XZ),
 // объекты, загораживающие камеру, и именованные точки (spots) для NPC и маркеров.
 import * as THREE from 'three';
@@ -130,6 +131,57 @@ export function buildOffice() {
   };
   doorSign('Кабинет директора', -5.25, -2.35, '#8c3b3b');
   doorSign('Серверная', 5.25, 2.35, '#28405a');
+
+  // Закрываемые двери в проёмах перегородки. Коллайдер и occluder не через solid():
+  // их добавляет и убирает setLocks в зависимости от дня
+  const lockableDoor = (doorZ, color) => {
+    const leafH = DOOR_H - 0.12; // под наличником проёма
+    const leaf = box(0.12, leafH, 3.5, color, 5, 0, doorZ);
+    const g = group(
+      leaf,
+      box(0.04, 0.05, 0.22, '#d9dde0', 5 - 0.08, 1.05, doorZ + 0.35),
+      box(0.04, 0.05, 0.22, '#d9dde0', 5 + 0.08, 1.05, doorZ + 0.35),
+    );
+    g.visible = false;
+    root.add(g);
+    return {
+      group: g,
+      color,
+      sign: null,
+      collider: { x0: 5 - 0.15, z0: doorZ - 1.75, x1: 5 + 0.15, z1: doorZ + 1.75 },
+      occluder: leaf,
+      doorZ,
+    };
+  };
+  const doors = {
+    director: lockableDoor(-5.25, '#8c3b3b'),
+    server: lockableDoor(5.25, '#28405a'),
+  };
+  const addOnce = (list, item) => { if (!list.includes(item)) list.push(item); };
+  const removeFrom = (list, item) => {
+    const k = list.indexOf(item);
+    if (k !== -1) list.splice(k, 1);
+  };
+  // locked — [{ room, sign }] закрытых комнат; текст таблички приходит из данных дней
+  const setLocks = (locked) => {
+    for (const [room, door] of Object.entries(doors)) {
+      const lock = locked.find((l) => l.room === room);
+      door.group.visible = Boolean(lock);
+      if (!lock) {
+        removeFrom(colliders, door.collider);
+        removeFrom(occluders, door.occluder); // raycast камеры не смотрит на visible — скрытую дверь убираем из occluders
+        continue;
+      }
+      addOnce(colliders, door.collider);
+      addOnce(occluders, door.occluder);
+      if (!door.sign && lock.sign) {
+        door.sign = createWallSign(lock.sign, { width: 1.6, height: 0.3, letterColor: door.color, frameColor: door.color });
+        door.sign.position.set(5 - 0.06, 1.5, door.doorZ);
+        door.sign.rotation.y = -Math.PI / 2; // лицом в open-space
+        door.group.add(door.sign);
+      }
+    }
+  };
 
   // Окна на внешних стенах: стекло в середине толщины стены и рамы одним InstancedMesh
   const glassMat = mat('#cfe8ff', { transparent: true, opacity: 0.18, roughness: 0.1, metalness: 0.1, depthWrite: false });
@@ -301,7 +353,7 @@ export function buildOffice() {
   spots.deskBug = deskSpots[6];
   spots.deskFeature = deskSpots[3];
 
-  // Доска дизайнера с цветными стикерами
+  // Канбан-доска менеджера с цветными стикерами
   const board = group(box(2.6, 1.5, 0.08, '#ffffff', 0, 0.9, 0));
   const stickers = ['#ff6b6b', '#ffd166', '#06d6a0', '#118ab2', '#2e9e5b', '#ef476f'];
   stickers.forEach((c, k) => board.add(box(0.32, 0.32, 0.02, c, -0.9 + (k % 3) * 0.9, 1.05 + Math.floor(k / 3) * 0.6, 0.05)));
@@ -311,7 +363,7 @@ export function buildOffice() {
   board.rotation.y = -0.25;
   root.add(board);
   solidFrom(board, 0.1);
-  spots.designer = { x: -0.4, z: 4.3, face: 0.4 };
+  spots.manager = { x: -0.4, z: 4.3, face: 0.4 };
 
   // Тимлид у своего стола
   spots.teamlead = { x: -2.5, z: -4.6, face: Math.PI * 0.6 };
@@ -356,6 +408,20 @@ export function buildOffice() {
   root.add(box(2.6, 1.05, 0.7, '#2e9e5b', -4, 0, 10));
   root.add(box(2.7, 0.06, 0.8, '#f4f1ea', -4, 1.05, 10));
   solid(-5.35, 9.6, -2.65, 10.4);
+
+  // Выход из офиса на южной стене между ресепшеном и растением. Декор в плоскости стены:
+  // коллайдер даёт сама стена, а маркер выхода ставит game.js в spots.exit
+  const exitFace = 12 - WALL_T / 2;
+  root.add(box(1.4, 2.4, 0.08, '#5a3b26', 1, 0, exitFace - 0.04));
+  root.add(box(1.6, 0.1, 0.12, '#3f2919', 1, 2.4, exitFace - 0.06)); // наличник
+  root.add(box(0.1, 2.4, 0.12, '#3f2919', 1 - 0.75, 0, exitFace - 0.06));
+  root.add(box(0.1, 2.4, 0.12, '#3f2919', 1 + 0.75, 0, exitFace - 0.06));
+  root.add(box(0.22, 0.05, 0.05, '#d9dde0', 1 + 0.45, 1.05, exitFace - 0.1)); // ручка
+  const exitSign = createWallSign('Выход', { width: 1.2, height: 0.3, letterColor: '#2e9e5b', frameColor: '#1f7442' });
+  exitSign.position.set(1, 2.75, exitFace);
+  exitSign.rotation.y = Math.PI;
+  root.add(exitSign);
+  spots.exit = { x: 1, z: 10.9 };
 
   // ---------- Кабинет директора ----------
   const bossDesk = group(
@@ -437,5 +503,5 @@ export function buildOffice() {
   // Описание внешнего контура для декорации снаружи (world/outdoor.js)
   const outline = { x0: -16, x1: 16, z0: -12, z1: 12, wallT: WALL_T, winW: WIN_W, northWindows: NORTH_WINDOWS, westWindows: WEST_WINDOWS };
 
-  return { root, colliders, occluders, spots, animated, setServerFixed, ceilingHeight: WALL_H, outline };
+  return { root, colliders, occluders, spots, animated, setServerFixed, setLocks, ceilingHeight: WALL_H, outline };
 }

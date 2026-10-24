@@ -1,6 +1,6 @@
 // Состояние игры и его сохранение в localStorage.
 const KEY = 'doncode-intern-save';
-const VERSION = 1;
+const VERSION = 2;
 
 export const QuestStatus = {
   AVAILABLE: 'available', // у NPC горит «!»
@@ -14,7 +14,9 @@ function emptyState(name) {
     name,
     quests: {},           // questId -> QuestStatus
     player: null,         // { x, z, heading }
-    finaleShown: false,
+    day: 0,               // индекс текущего рабочего дня в DAYS (quests/days.js)
+    dayIntroShown: false, // интро текущего дня уже закрыто
+    finished: false,      // последний день завершён — стажировка пройдена
   };
 }
 
@@ -26,7 +28,7 @@ export function loadSave() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (data?.version !== VERSION || typeof data.name !== 'string') return null;
+    if (data?.version !== VERSION || typeof data.name !== 'string' || typeof data.day !== 'number') return null;
     return data;
   } catch {
     return null;
@@ -66,8 +68,26 @@ export function setPlayerPose(pose) {
   state.player = pose;
 }
 
-export function setFinaleShown() {
-  state.finaleShown = true;
+export function currentDay() {
+  return state.day;
+}
+
+export function setDayIntroShown() {
+  state.dayIntroShown = true;
+  persist();
+}
+
+// Следующий рабочий день: игрок начинает его со спавна
+export function advanceDay() {
+  state.day += 1;
+  state.dayIntroShown = false;
+  state.player = null;
+  persist();
+  listeners.forEach((fn) => fn(state));
+}
+
+export function setFinished() {
+  state.finished = true;
   persist();
 }
 

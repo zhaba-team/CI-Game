@@ -481,3 +481,11 @@ pre.terminal { margin: 12px 0 0; background: #0b1f12; color: #7dffa8; font-famil
   #joystick { width: 110px; height: 110px; }
   body.touch #prompt { bottom: 20px; }
 }
+
+/* ---------- Рабочие дни: итоги дня и журнал ---------- */
+.day-summary h3 { font-size: 15px; margin: 14px 0 6px; color: var(--green); }
+.day-summary h3:first-child { margin-top: 4px; }
+.day-summary .roles li { margin-bottom: 6px; line-height: 1.5; }
+.done-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; line-height: 1.45; }
+.done-list li::before { content: '✅ '; }
+#journal li.exit-hint { color: #8fe0ad; font-weight: 800; font-size: 13px; border-top: 1px solid rgba(46, 158, 91, 0.6); padding-top: 8px; }
