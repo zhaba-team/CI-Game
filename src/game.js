@@ -1,6 +1,8 @@
 // Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов.
 import * as THREE from 'three';
 import { buildOffice } from './world/office.js';
+import { buildSky } from './world/sky.js';
+import { buildOutdoor } from './world/outdoor.js';
 import { createPlayer } from './world/player.js';
 import { createNpc, createQuestMarker } from './world/npc.js';
 import { createInput } from './input.js';
@@ -26,8 +28,9 @@ export function createGame({ onNewGame }) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#bfe4ff');
-  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+  scene.background = new THREE.Color('#d8eeff'); // фолбэк под куполом неба — цвет горизонта
+  // Дальность с запасом под купол неба R = 140
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 160);
 
   // Потолок смотрит вниз и получает groundColor: светлый тон, чтобы он не выглядел «грязным»
   scene.add(new THREE.HemisphereLight('#ffffff', '#c9b391', 1.0));
@@ -42,6 +45,11 @@ export function createGame({ onNewGame }) {
 
   const office = buildOffice();
   scene.add(office.root);
+  // Вид за окнами: небо и улица — декорация без теней и коллизий
+  const sky = buildSky();
+  scene.add(sky.root);
+  const outdoor = buildOutdoor(office.outline);
+  scene.add(outdoor.root);
   // Подсветка серверной под потолком: красная, пока сервер «лежит», голубая — после починки
   const serverLight = new THREE.PointLight('#ff6b6b', 6, 12);
   serverLight.position.set(11, office.ceilingHeight - 0.6, 6);
@@ -271,6 +279,7 @@ export function createGame({ onNewGame }) {
     for (const npc of npcs) npc.update(dt, time, player.position);
     for (const m of markers.values()) if (m.group.visible) m.update(time);
     for (const fn of office.animated) fn(time);
+    sky.update(time);
     if (running) checkInteractions();
     saveTimer += dt;
     if (running && saveTimer > 3) { saveTimer = 0; savePose(); }
@@ -336,6 +345,7 @@ export function createGame({ onNewGame }) {
       teleport: (x, z, face = 0) => player.place(x, z, face),
       spots: office.spots,
       colliders: office.colliders,
+      outdoor: outdoor.stats,
       talk: (npcId) => talk(npcs.find((n) => n.def.id === npcId)),
       minigame: (questId) => openMinigame(QUESTS.find((q) => q.id === questId)),
     };

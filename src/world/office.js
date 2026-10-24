@@ -1,7 +1,9 @@
 // Геометрия офиса: open-space, кабинет директора, серверная.
+// Окна — настоящие проёмы со стеклом; наружу смотрят северная и западная стены.
 // Возвращает сцену-группу, список коллайдеров (AABB в плоскости XZ),
 // объекты, загораживающие камеру, и именованные точки (spots) для NPC и маркеров.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mat, glow, box, cyl, ico, group } from './lowpoly.js';
 import { createWallSign } from './signs.js';
 
@@ -10,6 +12,10 @@ const WALL_T = 0.3;
 const DOOR_H = 2.7; // высота дверного проёма, выше — фрамуга
 const WIN_BOTTOM = 0.9;
 const WIN_H = 2.4;
+const WIN_W = 2.4;
+const NORTH_WINDOWS = [-13, -9, -5, -1, 3]; // x-центры окон на стене z = -12
+const WEST_WINDOWS = [-9, -5, -1, 3, 7];    // z-центры окон на стене x = -16
+const SHELF_X = 1.0;                        // книжный шкаф — в простенке между окнами x = -1 и x = 3
 const LAMP = 0.6;        // светящийся рассеиватель панели 60×60
 const LAMP_FRAME = 0.68;
 const LAMP_DROP = 0.04;  // насколько панель выступает из потолка
@@ -69,10 +75,39 @@ export function buildOffice() {
     occluders.push(m);
     solid(x0 - (x0 === x1 ? WALL_T / 2 : 0), z0 - (z0 === z1 ? WALL_T / 2 : 0), x1 + (x0 === x1 ? WALL_T / 2 : 0), z1 + (z0 === z1 ? WALL_T / 2 : 0));
   };
+  // Стена с оконными проёмами: один меш из кусков (1 draw call) и цельный коллайдер,
+  // так что окна остаются непроходимыми. axis 'x' — стена вдоль x на z = fixed, 'z' — вдоль z на x = fixed.
+  const windowWall = (axis, fixed, from, to, centers) => {
+    const pieces = [];
+    // Кусок стены [a..b] вдоль оси, [y0..y1] по высоте
+    const piece = (a, b, y0, y1) => {
+      if (b - a <= 0) return;
+      const len = b - a;
+      const g = axis === 'x' ? new THREE.BoxGeometry(len, y1 - y0, WALL_T) : new THREE.BoxGeometry(WALL_T, y1 - y0, len);
+      const mid = (a + b) / 2;
+      g.translate(axis === 'x' ? mid : fixed, (y0 + y1) / 2, axis === 'x' ? fixed : mid);
+      pieces.push(g);
+    };
+    const winTop = WIN_BOTTOM + WIN_H;
+    piece(from, to, 0, WIN_BOTTOM);
+    piece(from, to, winTop, WALL_H);
+    let edge = from;
+    for (const c of centers) {
+      piece(edge, c - WIN_W / 2, WIN_BOTTOM, winTop);
+      edge = c + WIN_W / 2;
+    }
+    piece(edge, to, WIN_BOTTOM, winTop);
+    const m = new THREE.Mesh(mergeGeometries(pieces), wallMat);
+    m.castShadow = m.receiveShadow = true;
+    root.add(m);
+    occluders.push(m);
+    if (axis === 'x') solid(from, fixed - WALL_T / 2, to, fixed + WALL_T / 2);
+    else solid(fixed - WALL_T / 2, from, fixed + WALL_T / 2, to);
+  };
   // Внешние стены
-  wallSegment(-16, -12, 16, -12);
+  windowWall('x', -12, -16, 16, NORTH_WINDOWS);
   wallSegment(-16, 12, 16, 12);
-  wallSegment(-16, -12, -16, 12);
+  windowWall('z', -16, -12, 12, WEST_WINDOWS);
   wallSegment(16, -12, 16, 12);
   // Перегородка между open-space и правым крылом с двумя дверями
   wallSegment(5, -12, 5, -7);
@@ -96,20 +131,42 @@ export function buildOffice() {
   doorSign('Кабинет директора', -5.25, -2.35, '#8c3b3b');
   doorSign('Серверная', 5.25, 2.35, '#28405a');
 
-  // Окна на внешних стенах
-  const windowMat = glow('#bfe4ff', 0.55);
-  for (let x = -13; x <= 3; x += 4) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(2.4, WIN_H), windowMat);
-    w.position.set(x, WIN_BOTTOM + WIN_H / 2, -11.84);
-    root.add(w);
-    root.add(box(2.6, 0.08, 0.1, '#9aa7a0', x, WIN_BOTTOM - 0.04, -11.8));
+  // Окна на внешних стенах: стекло в середине толщины стены и рамы одним InstancedMesh
+  const glassMat = mat('#cfe8ff', { transparent: true, opacity: 0.18, roughness: 0.1, metalness: 0.1, depthWrite: false });
+  const winY = WIN_BOTTOM + WIN_H / 2;
+  const windows = [
+    ...NORTH_WINDOWS.map((x) => ({ x, z: -12, west: false })),
+    ...WEST_WINDOWS.map((z) => ({ x: -16, z, west: true })),
+  ];
+  // Бруски рамы: [смещение вдоль стены, смещение по y, длина вдоль стены, высота]
+  const FRAME_DEPTH = 0.36;
+  const frameBars = [
+    [0, WIN_H / 2, WIN_W + 0.2, 0.08],  // верх
+    [0, -WIN_H / 2, WIN_W + 0.2, 0.08], // подоконник
+    [-WIN_W / 2, 0, 0.08, WIN_H],
+    [WIN_W / 2, 0, 0.08, WIN_H],
+    [0, 0, 0.06, WIN_H],                // импост
+  ];
+  const frames = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), mat('#9aa7a0'), windows.length * frameBars.length);
+  const dummy = new THREE.Object3D();
+  let frameIndex = 0;
+  for (const w of windows) {
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(WIN_W, WIN_H), glassMat);
+    glass.position.set(w.x, winY, w.z);
+    if (w.west) glass.rotation.y = Math.PI / 2;
+    root.add(glass);
+    occluders.push(glass); // стекло держит камеру в помещении: raycast по FrontSide попадает изнутри
+    for (const [along, dy, len, hgt] of frameBars) {
+      dummy.position.set(w.west ? w.x : w.x + along, winY + dy, w.west ? w.z + along : w.z);
+      dummy.scale.set(w.west ? FRAME_DEPTH : len, hgt, w.west ? len : FRAME_DEPTH);
+      dummy.updateMatrix();
+      frames.setMatrixAt(frameIndex++, dummy.matrix);
+    }
   }
-  for (let z = -9; z <= 9; z += 4) {
-    const w = new THREE.Mesh(new THREE.PlaneGeometry(2.4, WIN_H), windowMat);
-    w.rotation.y = Math.PI / 2;
-    w.position.set(-15.84, WIN_BOTTOM + WIN_H / 2, z);
-    root.add(w);
-  }
+  frames.instanceMatrix.needsUpdate = true;
+  frames.computeBoundingSphere();
+  frames.castShadow = false;
+  root.add(frames);
 
   // Вывеска компании: на внутренней грани задней стены, лицом в open-space,
   // центр на ~70 % высоты стены
@@ -258,14 +315,14 @@ export function buildOffice() {
 
   // Тимлид у своего стола
   spots.teamlead = { x: -2.5, z: -4.6, face: Math.PI * 0.6 };
-  root.add(box(1.6, 1.8, 0.4, '#6b4f36', -1.2, 0, -11.6)); // шкаф с книгами
+  root.add(box(1.6, 1.8, 0.4, '#6b4f36', SHELF_X, 0, -11.6)); // шкаф с книгами
   for (let k = 0; k < 4; k++) {
-    root.add(box(1.5, 0.04, 0.38, '#5a412c', -1.2, 0.4 + k * 0.45, -11.55));
+    root.add(box(1.5, 0.04, 0.38, '#5a412c', SHELF_X, 0.4 + k * 0.45, -11.55));
     for (let b = 0; b < 5; b++) {
-      root.add(box(0.2, 0.32, 0.26, ['#ef476f', '#118ab2', '#ffd166', '#06d6a0', '#8338ec'][(b + k) % 5], -1.75 + b * 0.27, 0.44 + k * 0.45, -11.5));
+      root.add(box(0.2, 0.32, 0.26, ['#ef476f', '#118ab2', '#ffd166', '#06d6a0', '#8338ec'][(b + k) % 5], SHELF_X - 0.55 + b * 0.27, 0.44 + k * 0.45, -11.5));
     }
   }
-  solid(-2.05, -11.85, -0.35, -11.3);
+  solid(SHELF_X - 0.85, -11.85, SHELF_X + 0.85, -11.3);
 
   // Зона отдыха: диван, кофемашина, кулер
   const sofa = group(
@@ -293,7 +350,7 @@ export function buildOffice() {
   plant(4.3, 11.2, 1.2);
   plant(-15.2, 11.2, 0.9);
   plant(-3, 8, 1.1);
-  plant(1.5, -11.2);
+  plant(-3, -11.2);
 
   // Стойка ресепшн у входа
   root.add(box(2.6, 1.05, 0.7, '#2e9e5b', -4, 0, 10));
@@ -377,5 +434,8 @@ export function buildOffice() {
 
   spots.spawn = { x: -6, z: 7, face: Math.PI };
 
-  return { root, colliders, occluders, spots, animated, setServerFixed, ceilingHeight: WALL_H };
+  // Описание внешнего контура для декорации снаружи (world/outdoor.js)
+  const outline = { x0: -16, x1: 16, z0: -12, z1: 12, wallT: WALL_T, winW: WIN_W, northWindows: NORTH_WINDOWS, westWindows: WEST_WINDOWS };
+
+  return { root, colliders, occluders, spots, animated, setServerFixed, ceilingHeight: WALL_H, outline };
 }
