@@ -42,8 +42,11 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`${APP_HOST:-app.localhost}`)"
-      - "traefik.http.services.frontend.loadbalancer.server.port=80"
-      - "traefik.http.routers.frontend.middlewares=compress-res"
+      - "traefik.http.routers.landing.entrypoints=websecure"
+      - "traefik.http.routers.landing.tls=true"
+      - "traefik.http.routers.landing.tls.certresolver=myresolver"
+      - "traefik.http.services.landing.loadbalancer.server.port=80"
+      - "traefik.http.routers.landing.middlewares=compress-res"
       - "traefik.http.middlewares.compress-res.compress=true"
 
 networks:
