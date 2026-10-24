@@ -1,0 +1,13 @@
+---
+- name: Create dir
+  file:
+    path: "{{ project_dest_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Clone Repo
+  git:
+    repo: "https://{{ github_username }}:{{ github_token }}@github.com/{{ github_repo_path }}.git"
+    dest: "{{ project_dest_dir }}"
+    version: main
+    accept_hostkey: yes

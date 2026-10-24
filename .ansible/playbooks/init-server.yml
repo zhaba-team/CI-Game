@@ -1,0 +1,22 @@
+- name: Expand the environment
+  hosts: webservers
+  vars_files:
+    - ../vars/default.yml
+  handlers:
+    - name: Restart Docker
+      systemd:
+        name: docker
+        state: restarted
+        daemon_reload: yes
+  tasks:
+    - name: Init Packages
+      ansible.builtin.include_tasks: ../tasks/packages/init.yml
+
+    - name: Setup Docker
+      ansible.builtin.include_tasks: ../tasks/docker/setup.yml
+
+    - name: Change Limits
+      ansible.builtin.include_tasks: ../tasks/system/limit.yml
+
+    - name: Install Plugin Docker
+      ansible.builtin.include_tasks: ../tasks/docker/rollout.yml

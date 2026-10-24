@@ -3,3 +3,6 @@ dist/
 .idea/
 .DS_Store
 CLAUDE.md
+pnpm-lock.yaml
+pnpm-workspace.yaml
+.env

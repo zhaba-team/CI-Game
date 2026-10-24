@@ -1,0 +1,20 @@
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "50m",
+    "max-file": "3"
+  },
+  "default-ulimits": {
+    "nofile": {
+      "Name": "nofile",
+      "Hard": 65535,
+      "Soft": 65535
+    }
+  },
+  "userland-proxy": false,
+  "registry-mirrors": [
+    "https://dockerhub.timeweb.cloud",
+    "https://dockerhub1.beget.com",
+    "https://mirror.gcr.io"
+  ]
+}
