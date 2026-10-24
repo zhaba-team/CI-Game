@@ -1,6 +1,8 @@
 // NPC с табличкой и значком над головой + маркеры на полу (активные квесты, выход из офиса).
 // spot.sit — NPC сидит (на лавке у стола): не разворачивается к игроку целиком, только поворачивает голову.
 // Стоящий NPC умеет ходить по точкам (walkTo / returnHome) — маршрут задаёт оркестратор, поиска пути нет.
+// setStanding(true) поднимает сидящего NPC (например, для пинг-понга; переставлять — только place),
+// setHeld(object) — предмет в правой руке, как у игрока.
 import * as THREE from 'three';
 import { createCharacter } from './characters.js';
 import { mat, glow, textSprite } from './lowpoly.js';
@@ -24,30 +26,38 @@ export function createNpc(def, spot) {
   group.add(model);
   group.position.set(spot.x, 0, spot.z);
   model.rotation.y = spot.face ?? 0;
-  const sit = Boolean(spot.sit);
-  if (sit) model.userData.setPose('sit');
-  const top = (sit ? 1.85 : 2.15) * (def.style.height ?? 1);
+  let seated = Boolean(spot.sit);
+  if (seated) model.userData.setPose('sit');
 
   // Имя крупно, под ним должность — мельче и бледнее
   const nameLabel = textSprite(def.name, { height: 0.26, size: 40, maxWidth: 1.6 });
-  nameLabel.position.y = top + 0.38;
   const roleLabel = textSprite(def.role, { height: 0.2, size: 34, bg: 'rgba(18,53,36,0.6)', color: '#d6f5e2', maxWidth: 1.6 });
-  roleLabel.position.y = top + 0.12;
   group.add(nameLabel, roleLabel);
-  const markerY = top + 0.8; // значки статуса — над плашкой с именем
 
   const markers = {
     available: exclamation(),
     active: textSprite('…', { bg: 'rgba(90,90,90,0.85)', height: 0.34 }),
     done: textSprite('✓', { bg: 'rgba(46,158,91,0.95)', height: 0.34 }),
   };
-  Object.values(markers).forEach((m) => { m.position.y = markerY; m.visible = false; group.add(m); });
+  Object.values(markers).forEach((m) => { m.visible = false; group.add(m); });
+
+  // Высота плашек и значков статуса зависит от позы: сидящий ниже
+  let markerY = 0;
+  const layoutLabels = () => {
+    const top = (seated ? 1.85 : 2.15) * (def.style.height ?? 1);
+    nameLabel.position.y = top + 0.38;
+    roleLabel.position.y = top + 0.12;
+    markerY = top + 0.8; // значки статуса — над плашкой с именем
+    Object.values(markers).forEach((m) => { m.position.y = markerY; });
+  };
+  layoutLabels();
 
   const baseFace = spot.face ?? 0;
   const tmp = new THREE.Vector3();
   let restFace = baseFace; // куда смотрит стоящий NPC, когда игрок далеко
   let route = null;        // { points, face, onArrive } — идёт по точкам points
   let trail = [];          // точки последнего пути от своего места: returnHome проходит их в обратном порядке
+  let held = null;         // предмет в руке (setHeld)
 
   const turnTo = (want, lerp) => {
     let diff = want - model.rotation.y;
@@ -55,7 +65,7 @@ export function createNpc(def, spot) {
     model.rotation.y += diff * lerp;
   };
   const go = (points, face, onArrive) => {
-    if (sit) throw new Error(`NPC «${def.id}» сидит и не может ходить (spot.sit)`);
+    if (spot.sit) throw new Error(`NPC «${def.id}» сидит и не может ходить (spot.sit)`);
     route = { points: points.map(({ x, z }) => ({ x, z })), face, onArrive };
   };
 
@@ -109,6 +119,26 @@ export function createNpc(def, spot) {
       restFace = face;
       trail = [...via.map((p) => ({ x: p.x, z: p.z })), { x, z }];
     },
+    // Встать / снова сесть; только для NPC со spot.sit, у стоящих — ничего не делает
+    setStanding(on) {
+      if (!spot.sit) return;
+      seated = !on;
+      model.userData.setPose(on ? 'stand' : 'sit');
+      model.userData.parts.head.rotation.y = 0;
+      layoutLabels();
+    },
+    // Предмет в правой руке (как player.setHeld): начало координат — дно предмета, hang — насколько
+    // он свисает от кисти; рука при этом вытянута вперёд (жест 'hold'). null — убрать предмет
+    setHeld(object) {
+      if (held === object) return;
+      if (held) held.removeFromParent();
+      held = object;
+      model.userData.setGesture(held ? 'hold' : null);
+      if (!held) return;
+      held.position.set(0, -0.71 - (held.userData.hang ?? 0.5), 0.06);
+      held.rotation.set(0, 0, 0);
+      model.userData.parts.armR.add(held);
+    },
     update(dt, time, playerPos) {
       markers.available.position.y = markerY - 0.05 + Math.sin(time * 3) * 0.08;
       markers.available.rotation.y = time * 2;
@@ -122,7 +152,7 @@ export function createNpc(def, spot) {
       const near = tmp.lengthSq() < 16;
       const want = near ? Math.atan2(tmp.x, tmp.z) : restFace;
       const lerp = 1 - Math.exp(-dt * 5);
-      if (sit) {
+      if (seated) {
         const { head } = model.userData.parts;
         let look = want - baseFace;
         look = THREE.MathUtils.clamp(Math.atan2(Math.sin(look), Math.cos(look)), -HEAD_TURN, HEAD_TURN);

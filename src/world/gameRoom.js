@@ -1,5 +1,6 @@
 // Наполнение Игровой: теннисный стол, зона консоли (ТВ, диван, геймпады), пуфики, кофе-бар и декор.
-// Интерактивны только пуфики (возвращаются как seats) и кофемашина (coffee); остальное — декор с коллайдерами.
+// Интерактивны пуфики (возвращаются как seats), кофемашина (coffee) и теннисный стол (pingPong — габарит,
+// ракетки на столе и их цвета; точки spots.pingPongPlayer / pingPongRival у торцов); остальное — декор с коллайдерами.
 // Помощники офиса (root, solid, solidFrom, spots, plant) приходят в ctx из world/office.js.
 import * as THREE from 'three';
 import { glow, box, cyl, ico, group, textPlane } from './lowpoly.js';
@@ -8,6 +9,29 @@ import { createCoffeeMachine } from './coffee.js';
 const POUF_H = 0.45; // как сиденье лавок: поза сидя (SIT_DROP) рассчитана на эту высоту
 const POUF_R = 0.38;
 const STAND_OFFSET = 0.95; // точка «встать» перед пуфиком: вне его коллайдера даже по диагонали (0.38·√2 + радиус игрока)
+const TABLE_W = 2.74;      // теннисный стол: длинная сторона по X
+const TABLE_D = 1.525;
+const END_GAP = 0.65;      // игрок у торца стола: вне коллайдера (запас 0.05) с радиусом игрока 0.35
+const RACKET_COLORS = ['#d62828', '#1b1b1f']; // ракетка игрока и соперника
+
+// Ракетка, лежащая плашмя: лопасть и ручка вдоль +z
+export function buildRacket(color) {
+  return group(
+    cyl(0.075, 0.075, 0.012, 10, color, 0, 0, 0),
+    box(0.03, 0.014, 0.1, '#8b5a2b', 0, 0, 0.12),
+  );
+}
+
+// Ракетка для руки (player.setHeld / npc.setHeld): начало координат — низ лопасти, ручка вверху у кисти,
+// лопасть стоит вертикально плоскостью вперёд. hang — насколько предмет свисает от кисти (соглашение setHeld)
+export function buildHeldRacket(color) {
+  const blade = cyl(0.075, 0.075, 0.012, 10, color, 0, 0, 0);
+  blade.rotation.x = Math.PI / 2; // ось цилиндра — вперёд, плоскость лопасти вертикальна
+  blade.position.set(0, 0.075, 0);
+  const g = group(blade, box(0.03, 0.1, 0.014, '#8b5a2b', 0, 0.12, 0));
+  g.userData.hang = 0.22;
+  return g;
+}
 
 export function buildGameRoom(ctx, room) {
   const { root, solid, solidFrom, spots, plant } = ctx;
@@ -18,7 +42,7 @@ export function buildGameRoom(ctx, room) {
 
   // ---------- Теннисный стол ----------
   const table = group(
-    box(2.74, 0.05, 1.525, '#1f5fa8', 0, 0.71, 0),
+    box(TABLE_W, 0.05, TABLE_D, '#1f5fa8', 0, 0.71, 0),
     box(2.74, 0.002, 0.02, '#f4f4f2', 0, 0.76, 0.7525),  // белые кромки
     box(2.74, 0.002, 0.02, '#f4f4f2', 0, 0.76, -0.7525),
     box(0.02, 0.002, 1.525, '#f4f4f2', 1.36, 0.76, 0),
@@ -30,21 +54,28 @@ export function buildGameRoom(ctx, room) {
   );
   for (const lx of [-1.2, 1.2]) for (const lz of [-0.65, 0.65]) table.add(box(0.06, 0.71, 0.06, '#333', lx, 0, lz));
   const racket = (color, x, z, rot) => {
-    const g = group(
-      cyl(0.075, 0.075, 0.012, 10, color, 0, 0, 0),
-      box(0.03, 0.014, 0.1, '#8b5a2b', 0, 0, 0.12),
-    );
+    const g = buildRacket(color);
     g.position.set(x, 0.762, z);
     g.rotation.y = rot;
     return g;
   };
-  table.add(racket('#d62828', -0.75, 0.35, 0.6), racket('#1b1b1f', 0.8, -0.3, -2.4));
+  const rackets = [racket(RACKET_COLORS[0], -0.75, 0.35, 0.6), racket(RACKET_COLORS[1], 0.8, -0.3, -2.4)];
+  table.add(...rackets);
   const ball = ico(0.02, '#ff9f1c', 1);
   ball.position.set(0.3, 0.782, 0.2);
   table.add(ball);
   table.position.set(-21.2, 0, 0.2);
   root.add(table);
   solidFrom(table, 0.05);
+  const { x: tx, z: tz } = table.position;
+  const pingPong = {
+    table: { x0: tx - TABLE_W / 2, x1: tx + TABLE_W / 2, z0: tz - TABLE_D / 2, z1: tz + TABLE_D / 2 },
+    rackets,
+    colors: RACKET_COLORS,
+  };
+  // Игрок — у восточного торца лицом на запад, соперник — у западного лицом на восток
+  spots.pingPongPlayer = { x: pingPong.table.x1 + END_GAP, z: tz, face: -Math.PI / 2 };
+  spots.pingPongRival = { x: pingPong.table.x0 - END_GAP, z: tz, face: Math.PI / 2 };
 
   // ---------- Зона консоли (юг комнаты) ----------
   const tvZ = south - 0.3; // 8.55
@@ -208,5 +239,5 @@ export function buildGameRoom(ctx, room) {
   neon.position.set(-23.3, 2.6, north + 0.025);
   root.add(neon);
 
-  return { seats, coffee };
+  return { seats, coffee, pingPong };
 }

@@ -583,3 +583,36 @@ pre.terminal { margin: 12px 0 0; background: #0b1f12; color: #7dffa8; font-famil
 @media (prefers-reduced-motion: reduce) {
   .modal.modal--bsod, .modal-backdrop--bsod { animation: none; }
 }
+
+/* ---------- Пинг-понг в Игровой (minigames/pingPong.js) ---------- */
+/* Высота стола задаёт его ширину (поле 300 × 540): помещается и по высоте окна, и по ширине модалки */
+.pingpong { --pp-h: min(60dvh, 540px, calc((100vw - 72px) * 1.8)); display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.pp-head { width: calc(var(--pp-h) * 5 / 9); min-width: 240px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pp-score { display: flex; align-items: baseline; gap: 8px; font-size: 10px; color: var(--muted); min-width: 0; }
+.pp-score span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-score b { font-size: 18px; font-weight: 400; color: var(--ink); }
+.pp-pause { padding: 8px 12px; font-size: 12px; flex-shrink: 0; }
+.pp-stage { position: relative; line-height: 0; }
+.pp-canvas {
+  display: block;
+  height: var(--pp-h);
+  width: calc(var(--pp-h) * 5 / 9);
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+  touch-action: none; /* ракетка пальцем — без прокрутки страницы */
+  cursor: none;
+}
+.pp-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px; background: rgba(10, 25, 17, 0.45); border-radius: 12px; line-height: 1.6; }
+.pp-overlay[hidden] { display: none; }
+.pp-card { background: var(--card); border-radius: 14px; padding: 14px; text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25); }
+.pp-card p { margin: 0; font-size: 10px; line-height: 1.8; }
+.pp-result { font-size: 12px; color: var(--red); }
+.pp-result.won { color: var(--green); }
+.pp-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.pp-hint { font-size: 8px; color: var(--muted); text-align: center; line-height: 1.6; }
+@media (max-width: 480px) {
+  .pingpong { --pp-h: min(58dvh, calc((100vw - 56px) * 1.8)); gap: 8px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .pingpong { --pp-h: calc(100dvh - 150px); }
+}

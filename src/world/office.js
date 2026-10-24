@@ -699,5 +699,6 @@ export function buildOffice() {
     root, colliders, occluders, spots, animated, setServerFixed, setScreenCrashed, setEvening, setLocks, setExtinguisherOnWall, ceilingHeight: WALL_H, outline,
     seats: gameRoom.seats,
     coffee: gameRoom.coffee,
+    pingPong: gameRoom.pingPong,
   };
 }

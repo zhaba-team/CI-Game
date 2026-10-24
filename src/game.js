@@ -1,6 +1,6 @@
 // Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов,
 // шаги многошаговых квестов (диалог, подход NPC, предмет, тушение огня, мини-игра, полноэкранная сцена),
-// рабочие дни (интро, итоги, переход к следующему дню, вечер) и финал.
+// рабочие дни (интро, итоги, переход к следующему дню, вечер), пинг-понг в Игровой и финал.
 import * as THREE from 'three';
 import { buildOffice } from './world/office.js';
 import { buildSky, SKY_DAY, SKY_EVENING } from './world/sky.js';
@@ -10,6 +10,8 @@ import { createNpc, createQuestMarker } from './world/npc.js';
 import { createFire, buildExtinguisher } from './world/fire.js';
 import { createInput } from './input.js';
 import { createProps } from './flow/props.js';
+import { createPingPong } from './flow/pingPong.js';
+import { buildHeldRacket } from './world/gameRoom.js';
 import { createHud } from './ui/hud.js';
 import { h } from './ui/dom.js';
 import { openModal, closeModal, onModalChange, isModalOpen } from './ui/modal.js';
@@ -165,6 +167,29 @@ export function createGame({ onNewGame }) {
     input,
     handsFree: () => heldItem() === null,
   });
+  // Теннисный стол: матч со случайным NPC; соперник на время матча без коллайдера
+  const pingPong = createPingPong({
+    ...office.pingPong,
+    makeRacket: buildHeldRacket,
+    spots: office.spots,
+    npcs,
+    player,
+    hud,
+    handsFree: () => heldItem() === null,
+    openModal,
+    closeModal,
+    getMinigame,
+    h,
+    playerName: () => name(),
+    fill: (text) => t(text),
+    homeOf,
+    onOpponentEnter: (npc) => removeCollider(npc),
+    onOpponentLeave: (npc) => {
+      placeCollider(npc);
+      if (npcArrived(npc)) addCollider(npc);
+      refresh(); // не пришедший по сюжету NPC снова скрыт, в руке — предмет квеста
+    },
+  });
   let fireBurning = false; // хоть одна стойка горит — свет серверной мерцает
   const exitMarker = createQuestMarker(office.spots.exit.x, office.spots.exit.z, { color: '#2e9e5b', beam: '#9be7b4' });
   scene.add(exitMarker.group);
@@ -245,8 +270,8 @@ export function createGame({ onNewGame }) {
       const status = talkStepFor(npc.def.id) ? QuestStatus.AVAILABLE : quest ? store.questStatus(quest.id) : null;
       npc.setStatus(status);
       const arrived = npcArrived(npc);
-      npc.group.visible = arrived;
-      if (npc.walking) continue; // коллайдер вернёт окончание пути
+      npc.group.visible = arrived || pingPong.opponent === npc; // соперник виден у стола, даже если ещё не пришёл
+      if (npc.walking || pingPong.opponent === npc) continue; // коллайдер вернёт окончание пути / матча
       if (arrived) addCollider(npc);
       else removeCollider(npc);
     }
@@ -260,7 +285,7 @@ export function createGame({ onNewGame }) {
       fireBurning ||= burns;
     }
     const held = heldItem() === 'extinguisher';
-    if (!props.holdsItem) player.setHeld(held ? heldExtinguisher : null); // стаканчик рафа не выбиваем из рук
+    if (!props.holdsItem && !pingPong.active) player.setHeld(held ? heldExtinguisher : null); // стаканчик рафа не выбиваем из рук
     office.setExtinguisherOnWall(!held);
     const dayDone = isDayDone();
     exitMarker.group.visible = dayDone;
@@ -420,13 +445,19 @@ export function createGame({ onNewGame }) {
 
   // Расставить NPC по состоянию (старт и перезапуск игры): подошедший по approach-шагу стоит у игрока,
   // остальные — на своих местах
+  // Где NPC должен стоять сейчас: у игрока по approach-шагу (via — путь от своего места) или на своём spot
+  function homeOf(npc) {
+    const target = talkStepFor(npc.def.id);
+    const spot = target?.step.approach ? office.spots[target.step.spot] : office.spots[npc.def.spot];
+    return { x: spot.x, z: spot.z, face: spot.face, via: target?.step.approach ? spot.path ?? [] : [] };
+  }
+
   function placeNpcs() {
     for (const npc of npcs) {
-      const target = talkStepFor(npc.def.id);
-      const spot = target?.step.approach ? office.spots[target.step.spot] : office.spots[npc.def.spot];
-      if (!npc.walking && npc.position.x === spot.x && npc.position.z === spot.z) continue;
+      const home = homeOf(npc);
+      if (!npc.walking && npc.position.x === home.x && npc.position.z === home.z) continue;
       removeCollider(npc);
-      npc.place(spot.x, spot.z, spot.face, { via: target?.step.approach ? spot.path : [] });
+      npc.place(home.x, home.z, home.face, { via: home.via });
       placeCollider(npc);
       if (npcArrived(npc)) addCollider(npc);
     }
@@ -601,7 +632,7 @@ export function createGame({ onNewGame }) {
     else if (nearFire) { if (canExtinguish(nearFire)) extinguish(nearFire); }
     else if (nearExit) showDaySummary();
     else if (nearNpc) talk(nearNpc);
-    else props.interact();
+    else if (!pingPong.interact()) props.interact();
   }
   input.onAction(interact);
 
@@ -683,7 +714,7 @@ export function createGame({ onNewGame }) {
       hud.setPrompt(`${key}Поговорить: ${nearNpc.def.name}`);
       input.setActionVisible(true, '💬');
     } else {
-      const prop = props.check();
+      const prop = pingPong.check() ?? props.check();
       hud.setPrompt(prop ? `${prop.action ? key : ''}${prop.text}` : null);
       input.setActionVisible(Boolean(prop?.action), prop?.icon);
     }
@@ -819,6 +850,8 @@ export function createGame({ onNewGame }) {
         }
       },
       evening: (on) => applyTimeOfDay(on),
+      pingPong: (npcId) => pingPong.start(npcId),
+      npc: (id) => npcById(id),
       office,
     };
   }
