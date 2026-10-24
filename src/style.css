@@ -742,3 +742,111 @@ pre.terminal { margin: 12px 0 0; background: #0b1f12; color: #7dffa8; font-famil
 @media (max-height: 500px) and (orientation: landscape) {
   .pingpong { --pp-h: calc(100dvh - 150px); }
 }
+
+/* ---------- Бой на световых мечах (ui/duelHud.js) ---------- */
+/* Во время боя обычный HUD и сенсорный стик спрятаны: остаются только жизни, стрелка замаха и кнопки боя */
+body.duel #touch, body.duel #journal, body.duel #trophy-btn, body.duel #menu-btn, body.duel #prompt, body.duel #lock-hint { display: none !important; }
+#duel-hud { position: absolute; inset: 0; pointer-events: none !important; color: #fff; }
+#duel-hud button { pointer-events: auto; }
+.duel-top {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  left: calc(12px + env(safe-area-inset-left));
+  right: calc(12px + env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.duel-side { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 10px; min-width: 0; }
+.duel-side b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.duel-hearts { display: flex; gap: 2px; font-size: 14px; color: var(--red); font-style: normal; }
+.duel-hearts i { font-style: normal; transition: opacity 0.3s, transform 0.3s; }
+.duel-hearts i.lost { opacity: 0.2; transform: scale(0.8); }
+.duel-combo { padding: 8px 12px; font-size: 10px; color: var(--yellow); white-space: nowrap; }
+.duel-btn {
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  background: rgba(18, 53, 36, 0.8);
+  color: #fff;
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  font-size: 22px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.duel-btn:active { transform: translateY(2px); background: rgba(46, 158, 91, 0.9); }
+.duel-btn small { font-size: 7px; opacity: 0.75; }
+body.touch .duel-btn small { display: none; }
+.duel-pause-btn { width: 48px; height: 48px; border-radius: 14px; flex-shrink: 0; font-size: 18px; }
+.duel-controls {
+  position: absolute;
+  left: calc(16px + env(safe-area-inset-left));
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.duel-blocks { display: flex; gap: 10px; }
+.duel-strike { width: 76px; height: 76px; border-radius: 50%; font-size: 30px; opacity: 0.45; }
+.duel-strike.ready { opacity: 1; background: var(--yellow); color: var(--green-dark); border-color: #fff; animation: pulse 0.6s infinite; }
+body.touch .duel-btn { width: 64px; height: 64px; font-size: 26px; }
+body.touch .duel-strike { width: 84px; height: 84px; font-size: 34px; }
+/* Кольцо-таймер замаха: доля оставшегося времени --p (1 → 0) */
+.duel-cue {
+  --p: 1;
+  position: absolute;
+  left: 50%;
+  top: calc(84px + env(safe-area-inset-top));
+  transform: translateX(-50%);
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(var(--yellow) calc(var(--p) * 1turn), rgba(255, 255, 255, 0.18) 0);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.duel-cue::before { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: rgba(18, 53, 36, 0.9); }
+.duel-cue span { position: relative; font-size: 34px; line-height: 1; }
+.duel-cue.urgent { background: conic-gradient(var(--red) calc(var(--p) * 1turn), rgba(255, 255, 255, 0.18) 0); }
+.duel-cue.opening { background: conic-gradient(#9be7ff calc(var(--p) * 1turn), rgba(255, 255, 255, 0.18) 0); }
+.duel-banner {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  font-size: 28px;
+  color: var(--yellow);
+  text-shadow: 0 3px 0 var(--green-dark), 0 0 18px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.duel-banner.pop { animation: duel-pop 0.3s ease-out; }
+@keyframes duel-pop { from { transform: translate(-50%, -50%) scale(1.6); opacity: 0; } }
+.duel-flash.on { animation: alarm-flash 0.45s ease-in-out 1; }
+.duel-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10, 25, 17, 0.55); pointer-events: auto !important; }
+.duel-card { background: var(--card); color: var(--ink); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 220px; text-align: center; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25); }
+@media (prefers-reduced-motion: reduce) { .duel-banner.pop, .duel-strike.ready { animation: none; } }
+@media (max-width: 480px) {
+  .duel-side { padding: 6px 8px; gap: 4px; font-size: 8px; }
+  .duel-hearts { font-size: 11px; gap: 1px; }
+  .duel-combo { padding: 6px 8px; font-size: 8px; }
+  .duel-pause-btn { width: 40px; height: 40px; }
+  .duel-top { top: calc(8px + env(safe-area-inset-top)); left: 8px; right: 8px; gap: 4px; }
+  .duel-cue { top: calc(64px + env(safe-area-inset-top)); width: 72px; height: 72px; }
+  .duel-banner { font-size: 22px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .duel-cue { top: calc(64px + env(safe-area-inset-top)); width: 64px; height: 64px; }
+  .duel-cue span { font-size: 28px; }
+  body.touch .duel-btn { width: 56px; height: 56px; }
+  body.touch .duel-strike { width: 72px; height: 72px; }
+}

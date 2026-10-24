@@ -1,5 +1,6 @@
 // Сборка low-poly персонажей из примитивов. Внешность описывается объектом style,
 // поэтому новых NPC можно добавлять без моделей — достаточно описать стиль.
+// Жесты рук (GESTURES) — стаканчик кофе и позы боя на световых мечах (guard, замахи, блоки, удар, оглушение).
 import * as THREE from 'three';
 import { mat, box, ico, textPlane } from './lowpoly.js';
 
@@ -36,10 +37,23 @@ const SIT_DROP = -0.3;
 const SIT_LEGS = -Math.PI / 2 + 0.12; // ноги вперёд, ступни чуть ниже колен
 const SIT_ARMS = -0.7;                // руки вперёд, на столешницу
 const LOUNGE_ARMS = -0.3;             // поза 'lounge' (пуфик без стола): руки на коленях
-// Жесты правой руки поверх обычной анимации: 'hold' — держит стаканчик перед собой, 'drink' — подносит ко рту
+// Жесты поверх обычной анимации: arm — правая рука вперёд (rotation.x), armZ — правая рука в сторону
+// (rotation.z, + — к +x модели), armL — левая рука по X для двуручного хвата (null — обычная анимация), head — наклон головы.
+// 'hold' — держит стаканчик перед собой, 'drink' — подносит ко рту; остальные — бой на световых мечах
 const GESTURES = {
-  hold: { arm: -1.0, head: 0 },
+  hold: { arm: -1.0 },
   drink: { arm: -2.1, head: -0.25 },
+  // Бой: стороны — с точки зрения игрока на экране. Илья стоит лицом к камере, и «лево на экране» у него —
+  // это −x модели, а у игрока (спиной к камере) — +x модели, поэтому знаки armZ у замахов и блоков зеркальны
+  guard: { arm: -1.15, armZ: -0.35, armL: -1.0 },
+  windupLeft: { arm: -1.3, armZ: -1.3, armL: -0.4 },
+  windupRight: { arm: -1.2, armZ: 1.5, armL: -0.3 },
+  windupHigh: { arm: -2.7, armZ: -0.2, armL: -2.5, head: -0.15 },
+  blockLeft: { arm: -0.9, armZ: 0.9, armL: -0.4 },
+  blockRight: { arm: -1.0, armZ: -0.9, armL: -0.9 },
+  blockHigh: { arm: -2.5, armZ: -0.3, armL: -2.3, head: -0.1 },
+  strike: { arm: -0.5, armZ: -0.2, armL: -0.5 },
+  stagger: { arm: 0.5, armZ: 0.6, armL: 0.3, head: -0.35 },
 };
 
 const HAIR_STYLES = ['short', 'parted', 'quiff', 'long', 'bun', 'spiky', 'bob', 'none'];
@@ -406,9 +420,10 @@ export function createCharacter(styleOverrides = {}) {
     const arm = sitting ? armsDown : 0;
     legL.rotation.x += (leg + swing - legL.rotation.x) * lerp;
     legR.rotation.x += (leg - swing - legR.rotation.x) * lerp;
-    armL.rotation.x += (arm - swing - armL.rotation.x) * lerp;
+    armL.rotation.x += ((gesture?.armL ?? arm - swing) - armL.rotation.x) * lerp;
     armR.rotation.x += ((gesture ? gesture.arm : arm + swing) - armR.rotation.x) * lerp;
-    head.rotation.x += ((gesture ? gesture.head : 0) - head.rotation.x) * lerp;
+    armR.rotation.z += ((gesture?.armZ ?? 0) - armR.rotation.z) * lerp;
+    head.rotation.x += ((gesture?.head ?? 0) - head.rotation.x) * lerp;
     const base = sitting ? SIT_DROP : 0;
     body.position.y = base + (moving ? Math.abs(Math.sin(phase)) * 0.05 : Math.sin(time * 2) * 0.012);
   };

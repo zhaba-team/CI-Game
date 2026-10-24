@@ -2,7 +2,7 @@
 // spot.sit — NPC сидит (на лавке у стола): не разворачивается к игроку целиком, только поворачивает голову.
 // Стоящий NPC умеет ходить по точкам (walkTo / returnHome) — маршрут задаёт оркестратор, поиска пути нет.
 // setStanding(true) поднимает сидящего NPC (например, для пинг-понга; переставлять — только place),
-// setHeld(object) — предмет в правой руке, как у игрока.
+// setHeld(object) — предмет в правой руке, как у игрока; setGesture(name) — поза рук (например, в бою на мечах).
 import * as THREE from 'three';
 import { createCharacter } from './characters.js';
 import { mat, glow, textSprite } from './lowpoly.js';
@@ -138,6 +138,10 @@ export function createNpc(def, spot) {
       held.position.set(0, -0.71 - (held.userData.hang ?? 0.5), 0.06);
       held.rotation.set(0, 0, 0);
       model.userData.parts.armR.add(held);
+    },
+    // Жест рук поверх анимации (ключ GESTURES в characters.js) или null; setHeld сбрасывает его на 'hold'
+    setGesture(name) {
+      model.userData.setGesture(name);
     },
     update(dt, time, playerPos) {
       markers.available.position.y = markerY - 0.05 + Math.sin(time * 3) * 0.08;

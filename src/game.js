@@ -1,7 +1,7 @@
 // Игровой мир: сцена, цикл обновления, взаимодействие с NPC и маркерами квестов,
 // шаги многошаговых квестов (диалог, подход NPC, предмет, тушение огня, мини-игра, полноэкранная сцена),
-// рабочие дни (интро, итоги, переход к следующему дню, вечер), пинг-понг в Игровой, База знаний на полке,
-// коллекционные книги и финал.
+// рабочие дни (интро, итоги, переход к следующему дню, вечер), пинг-понг в Игровой, бой на световых мечах с Ильёй,
+// База знаний на полке, коллекционные книги и финал.
 import * as THREE from 'three';
 import { buildOffice } from './world/office.js';
 import { buildSky, SKY_DAY, SKY_EVENING } from './world/sky.js';
@@ -12,11 +12,15 @@ import { createFire, buildExtinguisher } from './world/fire.js';
 import { createInput } from './input.js';
 import { createProps } from './flow/props.js';
 import { createPingPong } from './flow/pingPong.js';
+import { createLightsaber } from './flow/lightsaber.js';
+import { createSaberDuel } from './flow/saberDuel.js';
 import { createKnowledgeBase } from './flow/knowledge.js';
 import { createCollectibles } from './flow/collectibles.js';
 import { buildCollectibleBook } from './world/collectibleBook.js';
 import { buildHeldRacket } from './world/gameRoom.js';
+import { buildLightsaber, createSaberClash } from './world/lightsaber.js';
 import { createHud } from './ui/hud.js';
+import { createDuelHud } from './ui/duelHud.js';
 import { h } from './ui/dom.js';
 import { openModal, closeModal, onModalChange, isModalOpen } from './ui/modal.js';
 import { renderKnowledgeBase } from './ui/knowledgeBase.js';
@@ -199,6 +203,50 @@ export function createGame({ onNewGame }) {
       refresh(); // не пришедший по сюжету NPC снова скрыт, в руке — предмет квеста
     },
   });
+  // Световой меч на столе Ильи: бой прямо в кабинете; Илья на время боя без коллайдера, обычный ввод выключен
+  const clash = createSaberClash();
+  scene.add(clash.group);
+  const duelHud = createDuelHud({
+    onBlock: (dir) => lightsaber.block(dir),
+    onStrike: () => lightsaber.strike(),
+    onPause: () => lightsaber.pause(),
+    onResume: () => lightsaber.resume(),
+    onSurrender: () => lightsaber.surrender(),
+  });
+  const lightsaber = createLightsaber({
+    saber: buildLightsaber('#4da6ff'),
+    masterSaber: buildLightsaber('#4dff6a'),
+    clash,
+    scene,
+    spot: office.spots.saber,
+    spots: office.spots,
+    master: npcById('director'),
+    player,
+    hud,
+    duelHud,
+    createDuel: createSaberDuel,
+    openDialog: (...args) => openDialog(...args),
+    openModal,
+    closeModal,
+    isModalOpen,
+    h,
+    fill: (text) => t(text),
+    handsFree: () => heldItem() === null,
+    homeOf,
+    onMasterEnter: (npc) => removeCollider(npc),
+    onMasterLeave: (npc) => {
+      placeCollider(npc);
+      if (npcArrived(npc)) addCollider(npc);
+      refresh();
+    },
+    setDuelMode: (on) => {
+      input.setEnabled(!on);
+      if (on) input.unlockPointer();
+      else input.lockPointer();
+      document.body.classList.toggle('duel', on);
+      updateLockHint();
+    },
+  });
   let fireBurning = false; // хоть одна стойка горит — свет серверной мерцает
   const exitMarker = createQuestMarker(office.spots.exit.x, office.spots.exit.z, { color: '#2e9e5b', beam: '#9be7b4' });
   scene.add(exitMarker.group);
@@ -341,8 +389,9 @@ export function createGame({ onNewGame }) {
       const status = talkStepFor(npc.def.id) ? QuestStatus.AVAILABLE : quest ? store.questStatus(quest.id) : null;
       npc.setStatus(status);
       const arrived = npcArrived(npc);
-      npc.group.visible = arrived || pingPong.opponent === npc; // соперник виден у стола, даже если ещё не пришёл
-      if (npc.walking || pingPong.opponent === npc) continue; // коллайдер вернёт окончание пути / матча
+      const rival = pingPong.opponent === npc || lightsaber.master === npc;
+      npc.group.visible = arrived || rival; // соперник виден у стола / на арене, даже если ещё не пришёл
+      if (npc.walking || rival) continue; // коллайдер вернёт окончание пути / матча / боя
       if (arrived) addCollider(npc);
       else removeCollider(npc);
     }
@@ -356,7 +405,7 @@ export function createGame({ onNewGame }) {
       fireBurning ||= burns;
     }
     const held = heldItem() === 'extinguisher';
-    if (!props.holdsItem && !pingPong.active) player.setHeld(held ? heldExtinguisher : null); // стаканчик рафа не выбиваем из рук
+    if (!props.holdsItem && !pingPong.active && !lightsaber.active) player.setHeld(held ? heldExtinguisher : null); // стаканчик рафа и меч не выбиваем из рук
     office.setExtinguisherOnWall(!held);
     const dayDone = isDayDone();
     exitMarker.group.visible = dayDone;
@@ -382,8 +431,10 @@ export function createGame({ onNewGame }) {
   // Захват курсора (десктоп): на время модалки курсор свободен, после — захватываем снова.
   // Закрытие кнопкой — жест пользователя, браузер разрешит захват; иначе останется подсказка «кликни»
   let running = false;
-  const updateLockHint = () => hud.setLockHint(running && input.mouseMode && !isModalOpen() && !input.state.pointerLocked);
+  const updateLockHint = () => hud.setLockHint(running && input.mouseMode && !isModalOpen() && !input.state.pointerLocked && !lightsaber.active);
   onModalChange((open) => {
+    // Бой на мечах (вызов, арена, окно итога) сам управляет вводом и курсором — см. setDuelMode
+    if (lightsaber.active && !open) { updateLockHint(); return; }
     input.setEnabled(!open);
     if (open) input.unlockPointer();
     // openModal поверх открытого окна сначала закрывает старое — ждём, не откроется ли новое
@@ -732,11 +783,12 @@ export function createGame({ onNewGame }) {
   const canExtinguish = (f) => currentStep(f.quest) === f.step;
 
   function interact() {
-    if (isModalOpen() || props.busy || cutscene) return;
+    if (isModalOpen() || props.busy || cutscene || lightsaber.active) return;
     if (player.seated) { props.interact(); return; }
     if (nearMarker) activateMarker(nearMarker);
     else if (nearFire) { if (canExtinguish(nearFire)) extinguish(nearFire); }
     else if (nearExit) leaveOffice();
+    else if (lightsaber.interact()) { /* меч лежит у Ильи — раньше разговора с ним */ }
     else if (nearNpc) talk(nearNpc);
     else if (!pingPong.interact() && !collectibles.interact() && !knowledge.interact()) props.interact();
   }
@@ -744,7 +796,7 @@ export function createGame({ onNewGame }) {
   // Тап / клик по коллекционной книге подбирает её, по книжному шкафу — открывает Базу знаний (рядом)
   // или просит подойти ближе
   input.onTap((ndc) => {
-    if (isModalOpen() || props.busy || player.seated || cutscene) return;
+    if (isModalOpen() || props.busy || player.seated || cutscene || lightsaber.active) return;
     if (!collectibles.tap(ndc)) knowledge.tap(ndc);
   });
 
@@ -781,6 +833,11 @@ export function createGame({ onNewGame }) {
 
     if (isModalOpen()) return;
     const key = input.state.isTouch ? '' : 'E — ';
+    if (lightsaber.active) {
+      hud.setPrompt(null);
+      input.setActionVisible(false);
+      return;
+    }
     if (cutscene) {
       hud.setPrompt(`${cutscene.npc.def.name} идёт к тебе…`);
       input.setActionVisible(false);
@@ -809,6 +866,7 @@ export function createGame({ onNewGame }) {
     }
     if (!nearExit) lastExitAuto = false;
 
+    const saber = lightsaber.check();
     if (nearMarker) {
       const { text, icon } = markerPrompt(nearMarker);
       hud.setPrompt(`${key}${text}`);
@@ -822,6 +880,9 @@ export function createGame({ onNewGame }) {
     } else if (nearExit) {
       hud.setPrompt(`${key}${isLastDay() ? 'Выйти из офиса' : 'Завершить рабочий день'}`);
       input.setActionVisible(true, '🚪');
+    } else if (saber) {
+      hud.setPrompt(`${saber.action ? key : ''}${saber.text}`);
+      input.setActionVisible(saber.action, saber.icon);
     } else if (nearNpc) {
       hud.setPrompt(`${key}Поговорить: ${nearNpc.def.name}`);
       input.setActionVisible(true, '💬');
@@ -866,7 +927,11 @@ export function createGame({ onNewGame }) {
     store.persist();
   }
   window.addEventListener('beforeunload', () => { if (running) savePose(); });
-  document.addEventListener('visibilitychange', () => { if (document.hidden && running) savePose(); });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) return;
+    lightsaber.pause(); // бой на мечах встаёт на паузу вместе со вкладкой
+    if (running) savePose();
+  });
 
   function frame() {
     const dt = Math.min(clock.getDelta(), 0.05);
@@ -875,6 +940,7 @@ export function createGame({ onNewGame }) {
     input.update();
     props.update(dt, time);
     player.update(dt, input, time);
+    lightsaber.update(dt, time);
     for (const npc of npcs) npc.update(dt, time, player.position);
     for (const m of markers) if (m.marker.group.visible) m.marker.update(time);
     for (const f of fires) if (f.fire.group.visible) f.fire.update(time);
@@ -996,6 +1062,10 @@ export function createGame({ onNewGame }) {
       },
       evening: (on) => applyTimeOfDay(on),
       pingPong: (npcId) => pingPong.start(npcId),
+      duel: () => lightsaber.start(),
+      duelState: () => lightsaber.state,
+      duelWin: () => lightsaber.debugFinish('win'),
+      duelLose: () => lightsaber.debugFinish('lose'),
       knowledge: () => knowledge.open(),
       knowledgeNew: () => knowledge.newCount(),
       books: () => collectibles.open(),
