@@ -1,5 +1,6 @@
 // Мини-игра «Приветствие»: собрать из блоков функцию, которая здоровается с пользователем по имени.
 import { h } from '../ui/dom.js';
+import { makeDraggable, dropZone } from '../ui/dragDrop.js';
 
 const TOKENS = [
   { id: 'hello', code: '"Привет, "', value: 'Привет, ' },
@@ -17,22 +18,39 @@ export default {
   mount(root, { playerName, complete }) {
     const slots = Array(SLOTS).fill(null);
     let done = false;
+    const canDrag = () => !done;
     const valueOf = (t) => (t.value === null ? playerName : t.value);
 
     const slotsEl = h('span', { class: 'slots' });
     const tokensEl = h('div', { class: 'tokens' });
     const result = h('div', { class: 'hero-title' }, '…');
-    const feedback = h('div', { class: 'feedback' }, 'Нажимай на блоки, чтобы вставить их в код. Нажми на блок в коде, чтобы убрать его. Потом нажми «Запустить».');
+    const feedback = h('div', { class: 'feedback' }, 'Перетаскивай блоки в пропуски (или нажимай на них), чтобы вставить их в код. Блок из кода можно утащить обратно или нажать на него. Потом нажми «Запустить».');
     const runBtn = h('button', { class: 'btn primary', onclick: () => run() }, '▶ Запустить');
+
+    // Блок бросили в пропуск to (null — обратно в «Блоки кода»). Из списка — вытесняет блок пропуска,
+    // из другого пропуска — блоки меняются местами.
+    const moveTo = (t, to) => {
+      const from = slots.indexOf(t);
+      if (to === null) {
+        if (from !== -1) slots[from] = null;
+      } else {
+        const prev = slots[to];
+        slots[to] = t;
+        if (from !== -1) slots[from] = prev;
+      }
+      render();
+    };
+    const draggable = (el, t) => makeDraggable(el, { data: t, canDrag, onDrop: moveTo });
+    dropZone(tokensEl, null);
 
     const render = () => {
       slotsEl.replaceChildren(...slots.flatMap((t, i) => [
         i > 0 ? h('span', { class: 'tok-op' }, ' + ') : null,
-        t
-          ? h('button', { class: `token in-code ${t.value === null ? 'var' : 'str'}`, onclick: () => { if (!done) { slots[i] = null; render(); } } }, t.code)
-          : h('span', { class: 'token-slot' }, '___'),
+        dropZone(t
+          ? draggable(h('button', { class: `token in-code ${t.value === null ? 'var' : 'str'}`, onclick: () => { if (!done) { slots[i] = null; render(); } } }, t.code), t)
+          : h('span', { class: 'token-slot' }, '___'), i),
       ].filter(Boolean)));
-      tokensEl.replaceChildren(...TOKENS.map((t) => h('button', {
+      tokensEl.replaceChildren(...TOKENS.map((t) => draggable(h('button', {
         class: `token ${t.value === null ? 'var' : 'str'}`,
         disabled: slots.includes(t) || done,
         onclick: () => {
@@ -41,7 +59,7 @@ export default {
           slots[free] = t;
           render();
         },
-      }, t.code)));
+      }, t.code), t)));
       runBtn.disabled = done || slots.includes(null);
     };
 

@@ -63,15 +63,18 @@ export function group(...children) {
   return g;
 }
 
+// Пиксельный шрифт игры (одно начертание 400); эмодзи и недостающие символы — из системы.
+export const TEXT_FONT = '"Press Start 2P", "Apple Color Emoji", "Segoe UI Emoji", monospace';
+
 // Холст с надписью: общая отрисовка для спрайтов и надписей на поверхностях.
 function textCanvas(text, { color, bg, size }) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  const font = `800 ${size}px Nunito, system-ui, sans-serif`;
+  const font = `${size}px ${TEXT_FONT}`;
   ctx.font = font;
   const padX = size * 0.6;
   const w = Math.ceil(ctx.measureText(text).width + padX * 2);
-  const h = Math.ceil(size * 1.6);
+  const h = Math.ceil(size * 1.8);
   canvas.width = w;
   canvas.height = h;
   ctx.font = font;
@@ -85,8 +88,15 @@ function textCanvas(text, { color, bg, size }) {
   ctx.fillStyle = color;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, w / 2, h / 2 + size * 0.05);
+  ctx.fillText(text, w / 2, h / 2);
   return { canvas, w, h };
+}
+
+// Размер надписи в метрах: высота height, но не шире maxWidth (широкий шрифт не вылезает за рамку).
+function fitSize(w, h, height, maxWidth) {
+  const width = height * (w / h);
+  if (!maxWidth || width <= maxWidth) return [width, height];
+  return [maxWidth, maxWidth * (h / w)];
 }
 
 function canvasTexture(canvas) {
@@ -97,15 +107,16 @@ function canvasTexture(canvas) {
 }
 
 // Текстура-надпись для спрайтов (имена и значки над NPC).
-export function textSprite(text, { color = '#fff', bg = 'rgba(18,53,36,0.85)', size = 48, height = 0.35 } = {}) {
+export function textSprite(text, { color = '#fff', bg = 'rgba(18,53,36,0.85)', size = 48, height = 0.35, maxWidth } = {}) {
   const { canvas, w, h } = textCanvas(text, { color, bg, size });
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: canvasTexture(canvas), depthWrite: false }));
-  sprite.scale.set(height * (w / h), height, 1);
+  const [sw, sh] = fitSize(w, h, height, maxWidth);
+  sprite.scale.set(sw, sh, 1);
   return sprite;
 }
 
 // Надпись на поверхности (принт на одежде, табличка). Лицевая сторона смотрит в +z.
-export function textPlane(text, { color = '#fff', bg = null, size = 64, height = 0.1 } = {}) {
+export function textPlane(text, { color = '#fff', bg = null, size = 64, height = 0.1, maxWidth } = {}) {
   const { canvas, w, h } = textCanvas(text, { color, bg, size });
   const material = new THREE.MeshStandardMaterial({
     map: canvasTexture(canvas),
@@ -115,7 +126,7 @@ export function textPlane(text, { color = '#fff', bg = null, size = 64, height =
     polygonOffsetFactor: -1,
     depthWrite: false,
   });
-  const plane = new THREE.Mesh(new THREE.PlaneGeometry(height * (w / h), height), material);
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(...fitSize(w, h, height, maxWidth)), material);
   plane.castShadow = false;
   return plane;
 }

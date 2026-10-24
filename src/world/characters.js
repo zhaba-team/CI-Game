@@ -229,7 +229,7 @@ function addClothes(parts, s) {
 // Принт на груди справа у носящего (слева для зрителя).
 function addChestText(parts, s) {
   if (!s.chestText) return;
-  const plane = textPlane(s.chestText, { color: s.chestTextColor, height: 0.11 });
+  const plane = textPlane(s.chestText, { color: s.chestTextColor, height: 0.11, maxWidth: 0.24 * s.build }); // ширина до середины груди
   plane.position.set(-0.13, 0.52, 0.163);
   plane.scale.x = 1 / s.build; // торс растянут по x — буквы не должны растягиваться
   parts.torso.add(plane);

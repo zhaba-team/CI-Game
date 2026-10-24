@@ -1,5 +1,6 @@
 // Мини-игра «Пайплайн»: расставить шаги CI/CD в правильном порядке и запустить выкладку.
 import { h } from '../ui/dom.js';
+import { makeDraggable, dropZone } from '../ui/dragDrop.js';
 
 const STEPS = [
   { id: 'pull', icon: '⬇️', title: 'Скачать код', cmd: 'git pull' },
@@ -16,13 +17,14 @@ export default {
   id: 'pipeline',
   title: 'Почини пайплайн',
   mount(root, { complete }) {
-    let placed = [];
+    const slots = Array(STEPS.length).fill(null); // id шага в каждом слоте пайплайна
     let running = false;
+    const canDrag = () => !running;
 
     const pool = h('div', { class: 'pool' });
     const track = h('div', { class: 'track' });
     const log = h('pre', { class: 'terminal' }, '$ ожидаю запуск пайплайна…');
-    const feedback = h('div', { class: 'feedback' }, 'Нажимай на карточки, чтобы добавить шаги в пайплайн по порядку. Нажми на шаг в пайплайне, чтобы убрать его.');
+    const feedback = h('div', { class: 'feedback' }, 'Перетаскивай карточки в шаги пайплайна (или нажимай на них), чтобы расставить их по порядку. Шаг из пайплайна можно утащить обратно или нажать на него.');
     const runBtn = h('button', { class: 'btn primary', disabled: true, onclick: () => run() }, '▶ Запустить пайплайн');
 
     const card = (step, onclick, extra = '') => h('button', { class: `step-card ${extra}`, onclick, 'data-step': step.id },
@@ -30,21 +32,33 @@ export default {
       h('span', {}, h('b', {}, step.title), h('code', {}, step.cmd)),
     );
 
-    const render = () => {
-      pool.replaceChildren(...SHUFFLED.filter((id) => !placed.includes(id)).map((id) => card(byId[id], () => {
-        if (running) return;
-        placed.push(id);
-        render();
-      })));
-      const slots = [];
-      for (let i = 0; i < STEPS.length; i++) {
-        const id = placed[i];
-        slots.push(id
-          ? card(byId[id], () => { if (!running) { placed = placed.filter((p) => p !== id); render(); } }, 'placed')
-          : h('div', { class: 'step-slot' }, `Шаг ${i + 1}`));
+    // Карточку бросили в слот to (null — обратно в пул). Из пула — вытесняет карточку слота в пул,
+    // из другого слота — карточки меняются местами.
+    const moveTo = (id, to) => {
+      const from = slots.indexOf(id);
+      if (to === null) {
+        if (from !== -1) slots[from] = null;
+      } else {
+        const prev = slots[to];
+        slots[to] = id;
+        if (from !== -1) slots[from] = prev;
       }
-      track.replaceChildren(...slots);
-      runBtn.disabled = running || placed.length !== STEPS.length;
+      render();
+    };
+    const draggable = (el, id) => makeDraggable(el, { data: id, canDrag, onDrop: moveTo });
+    dropZone(pool, null);
+
+    const render = () => {
+      pool.replaceChildren(...SHUFFLED.filter((id) => !slots.includes(id)).map((id) => draggable(card(byId[id], () => {
+        const free = slots.indexOf(null);
+        if (running || free === -1) return;
+        slots[free] = id;
+        render();
+      }), id)));
+      track.replaceChildren(...slots.map((id, i) => dropZone(id
+        ? draggable(card(byId[id], () => { if (!running) { slots[i] = null; render(); } }, 'placed'), id)
+        : h('div', { class: 'step-slot' }, `Шаг ${i + 1}`), i)));
+      runBtn.disabled = running || !slots.every(Boolean);
       if (pool.childElementCount === 0) pool.append(h('div', { class: 'pool-empty' }, 'Все шаги расставлены — запускай!'));
     };
 
@@ -56,8 +70,8 @@ export default {
       const done = new Set();
       const lines = [];
       const cards = [...track.children];
-      for (let i = 0; i < placed.length; i++) {
-        const step = byId[placed[i]];
+      for (let i = 0; i < slots.length; i++) {
+        const step = byId[slots[i]];
         cards[i].classList.add('running');
         lines.push(`$ ${step.cmd}`);
         log.textContent = lines.join('\n');

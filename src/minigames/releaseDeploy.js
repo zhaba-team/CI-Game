@@ -1,5 +1,6 @@
 // Мини-игра «Релиз в пятницу»: расставить шаги релиза по порядку, выбрать номер версии по SemVer и выкатить.
 import { h } from '../ui/dom.js';
+import { makeDraggable, dropZone } from '../ui/dragDrop.js';
 
 const STEPS = [
   { id: 'merge', icon: '🔀', title: 'Слить ветку в main', cmd: 'git merge feature/promo' },
@@ -23,15 +24,16 @@ export default {
   id: 'release-deploy',
   title: 'Релиз в пятницу',
   mount(root, { playerName, complete }) {
-    let placed = [];
+    const slots = Array(STEPS.length).fill(null); // id шага в каждом слоте релиза
     let version = null;
     let running = false;
+    const canDrag = () => !running;
 
     const pool = h('div', { class: 'pool' });
     const track = h('div', { class: 'track' });
     const versions = h('div', { class: 'chips release-versions' });
     const log = h('pre', { class: 'terminal' }, '$ ожидаю запуск релиза… (до конца дня 1 минута)');
-    const feedback = h('div', { class: 'feedback' }, 'Нажимай на карточки, чтобы собрать релиз по шагам, и выбери номер новой версии. Нажми на шаг в релизе, чтобы убрать его.');
+    const feedback = h('div', { class: 'feedback' }, 'Перетаскивай карточки в шаги релиза (или нажимай на них) и выбери номер новой версии. Шаг из релиза можно утащить обратно или нажать на него.');
     const runBtn = h('button', { class: 'btn primary', disabled: true, onclick: () => run() }, '🚀 Запустить релиз');
 
     const cmdOf = (step) => (step.id === 'version' ? `npm version ${version ?? '?'}` : step.cmd);
@@ -40,25 +42,39 @@ export default {
       h('span', {}, h('b', {}, step.title), h('code', {}, cmdOf(step))),
     );
 
+    // Карточку бросили в слот to (null — обратно в пул). Из пула — вытесняет карточку слота в пул,
+    // из другого слота — карточки меняются местами.
+    const moveTo = (id, to) => {
+      const from = slots.indexOf(id);
+      if (to === null) {
+        if (from !== -1) slots[from] = null;
+      } else {
+        const prev = slots[to];
+        slots[to] = id;
+        if (from !== -1) slots[from] = prev;
+      }
+      render();
+    };
+    const draggable = (el, id) => makeDraggable(el, { data: id, canDrag, onDrop: moveTo });
+    dropZone(pool, null);
+
     const render = () => {
-      pool.replaceChildren(...SHUFFLED.filter((id) => !placed.includes(id)).map((id) => card(byId[id], () => {
-        if (running) return;
-        placed.push(id);
+      pool.replaceChildren(...SHUFFLED.filter((id) => !slots.includes(id)).map((id) => draggable(card(byId[id], () => {
+        const free = slots.indexOf(null);
+        if (running || free === -1) return;
+        slots[free] = id;
         render();
-      })));
+      }), id)));
       if (pool.childElementCount === 0) pool.append(h('div', { class: 'pool-empty' }, 'Все шаги в релизе — выбери версию и запускай!'));
-      track.replaceChildren(...STEPS.map((_, i) => {
-        const id = placed[i];
-        return id
-          ? card(byId[id], () => { if (!running) { placed = placed.filter((p) => p !== id); render(); } }, 'placed')
-          : h('div', { class: 'step-slot' }, `Шаг ${i + 1}`);
-      }));
+      track.replaceChildren(...slots.map((id, i) => dropZone(id
+        ? draggable(card(byId[id], () => { if (!running) { slots[i] = null; render(); } }, 'placed'), id)
+        : h('div', { class: 'step-slot' }, `Шаг ${i + 1}`), i)));
       versions.replaceChildren(...VERSIONS.map(({ v }) => h('button', {
         class: `chip${version === v ? ' selected' : ''}`,
         disabled: running,
         onclick: () => { version = v; render(); },
       }, v)));
-      runBtn.disabled = running || placed.length !== STEPS.length || !version;
+      runBtn.disabled = running || !slots.every(Boolean) || !version;
     };
 
     const fail = (cardEl, text, lines) => {
@@ -79,8 +95,8 @@ export default {
       const done = new Set();
       const lines = [];
       const cards = [...track.children];
-      for (let i = 0; i < placed.length; i++) {
-        const step = byId[placed[i]];
+      for (let i = 0; i < slots.length; i++) {
+        const step = byId[slots[i]];
         cards[i].classList.add('running');
         lines.push(`$ ${cmdOf(step)}`);
         log.textContent = lines.join('\n');

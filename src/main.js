@@ -1,4 +1,5 @@
 // Точка входа: стартовый экран (никнейм / продолжить) и запуск игры.
+import '@fontsource/press-start-2p/400.css';
 import { createGame } from './game.js';
 import { h } from './ui/dom.js';
 import * as store from './state.js';
@@ -8,7 +9,16 @@ import { DAYS, questsOfDay } from './quests/days.js';
 const screen = document.getElementById('start-screen');
 const content = document.getElementById('start-content');
 
-const game = createGame({
+// Надписи на canvas-текстурах (имена NPC, постеры, меню) рисуются один раз при сборке мира,
+// поэтому мир строим после загрузки пиксельного шрифта. На медленной сети не ждём дольше 3 с —
+// игра стартует с запасным шрифтом, а вывески (signs.js) перерисуются сами.
+const waitForFont = () => Promise.race([
+  document.fonts?.load('16px "Press Start 2P"', 'Стажёр ЁЖ Aa 0!') ?? Promise.resolve(),
+  new Promise((resolve) => setTimeout(resolve, 3000)),
+]).catch(() => {});
+
+let game;
+const createWorld = () => createGame({
   onNewGame: () => {
     game.stop();
     store.clearSave();
@@ -80,4 +90,7 @@ function showStart() {
   );
 }
 
-showStart();
+waitForFont().then(() => {
+  game = createWorld();
+  showStart();
+});

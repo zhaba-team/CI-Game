@@ -54,10 +54,10 @@ export function createCoffeeMachine() {
   const housing = new THREE.Group();
   housing.add(
     box(0.46, 0.62, 0.42, '#2d2f36', 0, 0, 0),
-    box(0.47, 0.06, 0.43, '#b497d6', 0, 0.56, 0),          // лавандовая полоса сверху
+    box(0.47, 0.07, 0.43, '#b497d6', 0, 0.565, 0),         // лавандовая полоса сверху: выше крышки корпуса (0.62), без z-fighting
     box(0.12, 0.05, 0.12, '#3b3e47', 0, SPOUT_Y + 0.04, 0.24), // кронштейн носика
     cyl(0.025, 0.018, 0.04, 6, '#9aa3ab', 0, SPOUT_Y, TRAY_Z),  // носик
-    box(0.3, TRAY_TOP, 0.16, '#5c606b', 0, 0, TRAY_Z),       // решётка-поддон
+    box(0.3, TRAY_TOP, 0.15, '#5c606b', 0, 0, TRAY_Z),       // решётка-поддон: зазор с фасадом корпуса (z 0.21)
   );
   const led = box(0.05, 0.05, 0.02, null, 0.15, 0.46, 0.215, glow('#b497d6', 1.2));
   led.material = led.material.clone(); // цвет светодиода меняется — свой материал
@@ -77,7 +77,7 @@ export function createCoffeeMachine() {
   const resetCup = () => {
     cup.removeFromParent();
     group.add(cup);
-    cup.position.set(0, TRAY_TOP, TRAY_Z);
+    cup.position.set(0, TRAY_TOP + 0.001, TRAY_Z); // дно чуть выше решётки — без z-fighting
     cup.rotation.set(0, 0, 0);
     cup.scale.setScalar(1);
     cup.visible = false;
@@ -145,9 +145,11 @@ export function createCoffeeMachine() {
         cup.scale.setScalar(1);
         stream.visible = true;
         foam.position.y = FOAM_LOW + (FOAM_HIGH - FOAM_LOW) * p;
-        stream.scale.set(0.8 + Math.sin(time * 40) * 0.2, SPOUT_Y - TRAY_TOP - foam.position.y - 0.01, 0.8 + Math.sin(time * 40) * 0.2);
-        housing.position.x = Math.sin(time * 70) * 0.003; // машина гудит
-        setLed(LED_IDLE, Math.sin(time * 10) > 0 ? 2 : 0.4);
+        // Частоты анимаций ниже половины частоты кадров: быстрые синусы на 60 fps давали стробоскоп
+        const wobble = 0.9 + Math.sin(time * 12) * 0.1;
+        stream.scale.set(wobble, SPOUT_Y - TRAY_TOP - foam.position.y - 0.01, wobble);
+        housing.position.x = Math.sin(time * 25) * 0.002; // машина гудит
+        setLed(LED_IDLE, 1.2 + 0.8 * Math.sin(time * 6)); // плавная пульсация вместо мигания
         return;
       }
       if (t < CUP_IN + BREW + HANDOFF) {

@@ -1,7 +1,7 @@
 // Физические настенные вывески: металлическая панель с гравированным текстом, рамка-подложка и болты.
 // Локальные координаты: тыльная сторона в плоскости z = 0 (поверхность стены), лицо смотрит в +z.
 import * as THREE from 'three';
-import { mat } from './lowpoly.js';
+import { mat, TEXT_FONT } from './lowpoly.js';
 
 const GAP = 0.002; // зазор от стены против z-fighting
 const BACK_D = 0.03;
@@ -39,14 +39,14 @@ export function createWallSign(text, { width, height, letterColor = '#2e9e5b', f
   const [colorCanvas, roughCanvas, bumpCanvas] = canvases;
   const pxPerM = w / width;
 
-  // Размер шрифта: не выше 55% панели и с полями под болты по краям
+  // Размер шрифта: не выше 45% панели (у пиксельного шрифта крупные заглавные) и с полями под болты по краям
   const fontFor = (ctx) => {
-    let size = h * 0.55;
-    ctx.font = `800 ${size}px Nunito, system-ui, sans-serif`;
+    let size = h * 0.45;
+    ctx.font = `${size}px ${TEXT_FONT}`;
     const maxW = (w - 0.2 * pxPerM) * 0.9;
     const textW = ctx.measureText(text).width;
     if (textW > maxW) size *= maxW / textW;
-    return { size, font: `800 ${size}px Nunito, system-ui, sans-serif` };
+    return { size, font: `${size}px ${TEXT_FONT}` };
   };
 
   // Горизонтальные штрихи шлифовки; colorFn(светлый ли, α) → цвет штриха
@@ -65,12 +65,12 @@ export function createWallSign(text, { width, height, letterColor = '#2e9e5b', f
   };
 
   const writeText = (ctx, color, dx = 0, dy = 0) => {
-    const { size, font } = fontFor(ctx);
+    const { font } = fontFor(ctx);
     ctx.font = font;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = color;
-    ctx.fillText(text, w / 2 + dx, h / 2 + size * 0.05 + dy);
+    ctx.fillText(text, w / 2 + dx, h / 2 + dy);
   };
 
   const draw = () => {
@@ -108,8 +108,8 @@ export function createWallSign(text, { width, height, letterColor = '#2e9e5b', f
   const [map, roughnessMap, bumpMap] = textures;
   map.colorSpace = THREE.SRGBColorSpace;
 
-  // Перерисовать, когда подгрузится кириллица Nunito; без шрифта остаётся fallback
-  document.fonts?.load('800 64px Nunito', text).then(() => {
+  // Перерисовать, когда подгрузится Press Start 2P (если мир собран раньше шрифта); без шрифта остаётся fallback
+  document.fonts?.load('64px "Press Start 2P"', text).then(() => {
     draw();
     textures.forEach((t) => { t.needsUpdate = true; });
   }).catch(() => {});

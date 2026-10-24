@@ -465,9 +465,9 @@ export function buildOffice() {
     const entry = deskScreens.get(spots[spotKey]);
     if (!entry) throw new Error(`У точки «${spotKey}» нет монитора рабочего места`);
     if (crashed && !entry.text) {
-      const sad = textPlane(':(', { height: 0.16, size: 96 });
+      const sad = textPlane(':(', { height: 0.16, size: 96, maxWidth: 0.3 });
       sad.position.set(-0.28, 0.08, 0.002);
-      const stop = textPlane('STOP 0x0000F12D', { height: 0.05, size: 48 });
+      const stop = textPlane('STOP 0x0000F12D', { height: 0.05, size: 48, maxWidth: 0.56 }); // экран 0.82 м
       stop.position.set(-0.12, -0.12, 0.002);
       entry.text = group(sad, stop);
       entry.screen.add(entry.text);
@@ -560,7 +560,7 @@ export function buildOffice() {
   const cube = box(0.34, 0.12, 0.26, '#f4f4f2', -12.2, 0.745, 7.75);
   cube.rotation.y = 0.2;
   root.add(cube);
-  const cubeLabel = textPlane('Нейрокубер', { color: '#1b2430', height: 0.06, size: 64 });
+  const cubeLabel = textPlane('Нейрокубер', { color: '#1b2430', height: 0.06, size: 64, maxWidth: 0.3 }); // крышка 0.34 м
   cubeLabel.rotation.set(-Math.PI / 2, 0, 0.2 + Math.PI); // на крышке, читается со стороны прохода
   cubeLabel.position.set(-12.2, 0.867, 7.75);
   root.add(cubeLabel);

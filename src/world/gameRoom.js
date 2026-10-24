@@ -147,14 +147,15 @@ export function buildGameRoom(ctx, room) {
   const coffee = createCoffeeMachine();
   coffee.group.position.set(barX + 0.3, 0.93, barZ - 0.05);
   root.add(coffee.group);
-  for (let k = 0; k < 3; k++) root.add(cyl(0.05, 0.038, 0.06, 8, '#f6f1e7', barX - 0.4, 0.93 + k * 0.035, barZ - 0.1)); // стопка стаканчиков
+  // Стопка стаканчиков: каждый следующий чуть шире — боковые грани не совпадают (иначе z-fighting)
+  for (let k = 0; k < 3; k++) root.add(cyl(0.05 + k * 0.003, 0.038 + k * 0.003, 0.06, 8, '#f6f1e7', barX - 0.4, 0.93 + k * 0.035, barZ - 0.1));
   root.add(cyl(0.05, 0.06, 0.14, 6, '#e9e6df', barX - 0.7, 0.93, barZ + 0.05)); // вазочка с лавандой
   for (let k = 0; k < 5; k++) {
     const sprig = cyl(0.012, 0.008, 0.26, 4, '#9d79c7', barX - 0.7 + Math.cos(k * 1.3) * 0.03, 1.02, barZ + 0.05 + Math.sin(k * 1.3) * 0.03);
     sprig.rotation.z = (k - 2) * 0.12;
     root.add(sprig);
   }
-  const menu = textPlane('Лавандовый раф', { color: '#5b3a8a', bg: '#f3ecfb', height: 0.22 });
+  const menu = textPlane('Лавандовый раф', { color: '#5b3a8a', bg: '#f3ecfb', height: 0.22, maxWidth: 1.6 });
   menu.position.set(barX, 1.75, north + 0.01);
   root.add(menu);
   spots.coffee = { x: barX + 0.3, z: -1.35, face: Math.PI };
@@ -188,7 +189,7 @@ export function buildGameRoom(ctx, room) {
   // Постеры на западном простенке, лицом в комнату (+x)
   const poster = (text, bg, color, z) => {
     const g = group(box(0.72, 0.92, 0.03, '#1b1b2f', 0, 0, 0), box(0.62, 0.82, 0.01, bg, 0, 0.05, 0.02));
-    const label = textPlane(text, { color, height: 0.16 });
+    const label = textPlane(text, { color, height: 0.16, maxWidth: 0.56 }); // поле постера 0.62 м
     label.position.set(0, 0.46, 0.031);
     g.add(label);
     g.position.set(west + 0.02, 1.45, z);
@@ -200,7 +201,7 @@ export function buildGameRoom(ctx, room) {
 
   // Неоновая надпись на тёмной плашке у северной стены
   root.add(box(2.2, 0.4, 0.04, '#1b1b2f', -23.3, 2.4, north));
-  const neon = textPlane('Играй · Отдыхай · Кодь', { color: '#ff6bd6', height: 0.24 });
+  const neon = textPlane('Играй · Отдыхай · Кодь', { color: '#ff6bd6', height: 0.24, maxWidth: 2.05 }); // плашка 2.2 м
   neon.material.emissive = new THREE.Color('#ff6bd6');
   neon.material.emissiveMap = neon.material.map;
   neon.material.emissiveIntensity = 0.8;

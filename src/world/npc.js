@@ -29,9 +29,9 @@ export function createNpc(def, spot) {
   const top = (sit ? 1.85 : 2.15) * (def.style.height ?? 1);
 
   // Имя крупно, под ним должность — мельче и бледнее
-  const nameLabel = textSprite(def.name, { height: 0.26, size: 40 });
+  const nameLabel = textSprite(def.name, { height: 0.26, size: 40, maxWidth: 1.6 });
   nameLabel.position.y = top + 0.38;
-  const roleLabel = textSprite(def.role, { height: 0.2, size: 34, bg: 'rgba(18,53,36,0.6)', color: '#d6f5e2' });
+  const roleLabel = textSprite(def.role, { height: 0.2, size: 34, bg: 'rgba(18,53,36,0.6)', color: '#d6f5e2', maxWidth: 1.6 });
   roleLabel.position.y = top + 0.12;
   group.add(nameLabel, roleLabel);
   const markerY = top + 0.8; // значки статуса — над плашкой с именем

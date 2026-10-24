@@ -51,7 +51,7 @@ function addDeskClutter(root, desks) {
 function poster(lines, bg, color) {
   const g = group(box(0.8, 1.0, 0.03, '#2b2d42', 0, 0, 0), box(0.7, 0.9, 0.01, bg, 0, 0.05, 0.02));
   lines.forEach((text, k) => {
-    const label = textPlane(text, { color, height: 0.17 });
+    const label = textPlane(text, { color, height: 0.17, maxWidth: 0.62 }); // поле постера 0.7 м
     label.position.set(0, 0.5 + ((lines.length - 1) / 2 - k) * 0.2, 0.031);
     g.add(label);
   });
@@ -167,7 +167,7 @@ export function addOfficeDecor(ctx, { desks }) {
   const menu = group(box(1.3, 1.0, 0.04, '#6b4f36', 0, 0, 0), box(1.18, 0.88, 0.01, '#2b3a2f', 0, 0.06, 0.025));
   const MENU_LINES = [['Меню дня', '#ffd166', 0.12], ['Борщ', '#f7f7f2', 0.08], ['Котлета с пюре', '#f7f7f2', 0.08], ['Компот', '#f7f7f2', 0.08]];
   MENU_LINES.forEach(([text, color, height], k) => {
-    const line = textPlane(text, { color, height });
+    const line = textPlane(text, { color, height, maxWidth: 1.05 }); // доска 1.18 м
     line.position.set(0, 0.8 - k * 0.18, 0.031);
     menu.add(line);
   });
